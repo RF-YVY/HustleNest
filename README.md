@@ -15,7 +15,7 @@ HustleNest is a desktop application written in Python (PySide6) for tracking pro
 - **About page** summarizing capabilities and surfacing update status on launch.
 
 ## Dashboard
-<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/d2930b53-abe5-4bb3-a905-2c741db14829" />
+<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/ac916871-8087-4669-af9e-38a1ccc831f7" />
 
 ## Orders
 <img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/08a66791-85a1-4c13-a4cd-bc4bdec6a942" />
@@ -105,4 +105,5 @@ README.md
 ## License
 
 This project currently has no explicit license. Add one if you plan to distribute the application.
+
 
