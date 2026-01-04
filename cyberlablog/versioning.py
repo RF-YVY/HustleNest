@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from itertools import zip_longest
 from typing import Optional, Tuple
 
-APP_VERSION = "v1.0"
-REPOSITORY = "RF-YVY/Sales-Tracking"
-REPOSITORY_URL = f"https://github.com/{REPOSITORY}"
+APP_VERSION = "v1.1"
+REPOSITORY = "RF-YVY/HustleNest"
+REPOSITORY_URL = "https://github.com/RF-YVY/HustleNest"
 RELEASES_URL = f"{REPOSITORY_URL}/releases"
 _LATEST_RELEASE_API = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 _TAGS_API = f"https://api.github.com/repos/{REPOSITORY}/tags"

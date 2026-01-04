@@ -1,6 +1,6 @@
 # HustleNest
 
-Current Version: **v1.0**
+Current Version: **v1.1**
 
 HustleNest is a desktop application written in Python (PySide6) for tracking product orders, shipping progress, and sales performance. Data is stored locally in a SQLite database that is provisioned automatically on first launch. The interface provides a dashboard, streamlined order entry, detailed reporting, inventory forecasting, and in-app notifications for low stock and overdue orders.
 
@@ -38,14 +38,14 @@ HustleNest is a desktop application written in Python (PySide6) for tracking pro
 
 The first run creates `%LOCALAPPDATA%\HustleNest\hustlenest.db`. Remove that file to reset all data.
 
-HustleNest checks for updates on startup by reaching the GitHub repository (`RF-YVY/Sales-Tracking`). If a newer tag or release exists, the app prompts with a download link.
+HustleNest checks for updates on startup by reaching the GitHub repository (`RF-YVY/HustleNest`). If a newer tag or release exists, the app prompts with a download link.
 
 ## Building an Executable
 
 To package HustleNest as a Windows executable named **HustleNest** with the bundled application icon:
 
 ```powershell
-& .venv\Scripts\python.exe -m PyInstaller --name HustleNest --windowed --icon "WickerMadeSales.ico" --add-data "WickerMadeSales.ico;." cyberlablog\main.py
+& .venv\Scripts\python.exe -m PyInstaller --name HustleNest --windowed --icon "HustleNest.ico" --add-data "HustleNest.ico;." cyberlablog\main.py
 ```
 
 The compiled application is placed in `dist/HustleNest/HustleNest.exe`.

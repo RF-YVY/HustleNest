@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from typing import List, Optional
 
 from ..models.order_models import Product
@@ -89,29 +90,38 @@ def update_product(product: Product) -> Product:
     if product.id is None:
         raise ValueError("Product ID is required for update")
 
-    with create_connection() as connection:
-        connection.execute(
-            """
-            UPDATE products
-            SET name = ?,
-                description = ?,
-                photo_path = ?,
-                inventory_count = ?,
-                is_complete = ?,
-                status = ?
-            WHERE id = ?
-            """,
-            (
-                product.name.strip(),
-                product.description.strip(),
-                product.photo_path.strip(),
-                max(0, int(product.inventory_count)),
-                int(product.is_complete),
-                product.status.strip() or "Ordered",
-                int(product.id),
-            ),
-        )
-        connection.commit()
+    sku = product.sku.strip().upper()
+    if not sku:
+        raise ValueError("SKU is required")
+
+    try:
+        with create_connection() as connection:
+            connection.execute(
+                """
+                UPDATE products
+                SET sku = ?,
+                    name = ?,
+                    description = ?,
+                    photo_path = ?,
+                    inventory_count = ?,
+                    is_complete = ?,
+                    status = ?
+                WHERE id = ?
+                """,
+                (
+                    sku,
+                    product.name.strip() or sku,
+                    product.description.strip(),
+                    product.photo_path.strip(),
+                    max(0, int(product.inventory_count)),
+                    int(product.is_complete),
+                    product.status.strip() or "Ordered",
+                    int(product.id),
+                ),
+            )
+            connection.commit()
+    except sqlite3.IntegrityError as exc:
+        raise ValueError(f"SKU '{sku}' already exists.") from exc
 
     return get_product_by_id(product.id)
 

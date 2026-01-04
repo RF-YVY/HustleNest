@@ -13,4 +13,4 @@ def resolve_asset_path(name: str) -> Path:
 
 
 def get_app_icon_path() -> Path:
-    return resolve_asset_path("WickerMadeSales.ico")
+    return resolve_asset_path("HustleNest.ico")

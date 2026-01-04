@@ -95,6 +95,79 @@ def insert_order(order: Order) -> int:
             cursor.close()
 
 
+def update_order(order_id: int, order: Order) -> None:
+    with create_connection() as connection:
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                UPDATE orders
+                SET
+                    order_number = ?,
+                    customer_name = ?,
+                    customer_address = ?,
+                    order_date = ?,
+                    ship_date = ?,
+                    status = ?,
+                    carrier = ?,
+                    tracking_number = ?,
+                    total_amount = ?,
+                    target_completion_date = ?
+                WHERE id = ?
+                """,
+                (
+                    order.order_number.strip(),
+                    order.customer_name.strip(),
+                    order.customer_address.strip(),
+                    order.order_date.strftime(_DATE_FORMAT),
+                    order.ship_date.strftime(_DATE_FORMAT) if order.ship_date else None,
+                    order.status.strip(),
+                    order.carrier.strip(),
+                    order.tracking_number.strip(),
+                    order.total_amount,
+                    order.target_completion_date.strftime(_DATE_FORMAT)
+                    if order.target_completion_date
+                    else None,
+                    int(order_id),
+                ),
+            )
+
+            cursor.execute("DELETE FROM order_items WHERE order_id = ?", (int(order_id),))
+
+            cursor.executemany(
+                """
+                INSERT INTO order_items (
+                    order_id,
+                    product_id,
+                    product_sku,
+                    product_name,
+                    product_description,
+                    quantity,
+                    unit_price
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        int(order_id),
+                        item.product_id,
+                        item.product_sku.strip().upper(),
+                        item.product_name.strip(),
+                        item.product_description.strip(),
+                        int(item.quantity),
+                        float(item.unit_price),
+                    )
+                    for item in order.items
+                ],
+            )
+
+            connection.commit()
+        except sqlite3.IntegrityError as exc:
+            connection.rollback()
+            raise exc
+        finally:
+            cursor.close()
+
+
 def generate_order_number_for_sku(sku: str, *, padding: int = 4) -> str:
     prefix = _extract_alpha_prefix(sku)
     return generate_order_number_from_prefix(prefix, padding=padding)
@@ -205,6 +278,31 @@ def fetch_orders(limit: int = 50) -> List[Order]:
             )
         cursor.close()
         return orders
+
+
+def fetch_order_destinations() -> List[tuple[str, str, str]]:
+    with create_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                order_number,
+                customer_name,
+                customer_address
+            FROM orders
+            WHERE TRIM(IFNULL(customer_address, '')) <> ''
+            """
+        ).fetchall()
+
+    results: List[tuple[str, str, str]] = []
+    for row in rows:
+        results.append(
+            (
+                row["order_number"],
+                row["customer_name"],
+                row["customer_address"],
+            )
+        )
+    return results
 
 
 def fetch_order(order_id: int) -> Optional[Order]:

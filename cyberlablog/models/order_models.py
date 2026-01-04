@@ -97,6 +97,14 @@ class OrderReportRow:
 
 
 @dataclass
+class OrderDestination:
+    city: str
+    state: str
+    count: int
+    order_numbers: List[str] = field(default_factory=list)
+
+
+@dataclass
 class DashboardSnapshot:
     total_sales: float
     outstanding_orders: int
@@ -124,6 +132,14 @@ class Product:
 class AppSettings:
     business_name: str
     low_inventory_threshold: int
+    order_number_format: str = "ORD-{seq:04d}"
+    order_number_next: int = 1
+    dashboard_show_business_name: bool = True
+    dashboard_logo_path: str = ""
+    dashboard_logo_alignment: str = "top-left"
+    dashboard_logo_size: int = 160
+    dashboard_home_city: str = ""
+    dashboard_home_state: str = ""
 
 
 @dataclass

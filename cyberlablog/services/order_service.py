@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import replace
+import re
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from ..data import order_repository, product_repository, settings_repository
 from ..models.order_models import (
@@ -16,8 +17,10 @@ from ..models.order_models import (
     OrderItem,
     OrderReportRow,
     OutstandingOrder,
+    OrderDestination,
     Product,
     ProductForecast,
+    ProductSalesSummary,
 )
 
 
@@ -37,6 +40,32 @@ _PRODUCT_STATUSES: List[str] = [
     "Discontinued",
 ]
 
+_DEFAULT_ORDER_NUMBER_FORMAT = "ORD-{seq:04d}"
+_SEQUENCE_PATTERN = re.compile(r"(\d+)(?!.*\d)")
+_CITY_STATE_PATTERN = re.compile(
+    r"(?P<city>.+?),\s*(?P<state>[A-Za-z]{2})(?:\s+\d{5}(?:-\d{4})?)?$"
+)
+_SKU_ALIASES: Dict[str, str] = {
+    "BC-0001": "BMETAL-CARD",
+}
+_VALID_LOGO_POSITIONS = {
+    "top-left",
+    "top-center",
+    "top-right",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+}
+
+
+@dataclass
+class _ProductSummaryAccumulator:
+    sku: str = ""
+    name: str = ""
+    fallback: str = ""
+    quantity: int = 0
+    sales: float = 0.0
+
 
 def save_order(order: Order) -> int:
     order_id = order_repository.insert_order(order)
@@ -52,12 +81,42 @@ def save_order(order: Order) -> int:
     return order_id
 
 
+def update_order(order_id: int, updated: Order) -> Order:
+    existing = order_repository.fetch_order(order_id)
+    if existing is None:
+        raise ValueError("Order not found")
+
+    normalized = replace(updated, id=order_id)
+
+    previous_quantities = _summarize_item_quantities(existing.items)
+    new_quantities = _summarize_item_quantities(normalized.items)
+
+    for sku in sorted(set(previous_quantities) | set(new_quantities)):
+        diff = new_quantities.get(sku, 0) - previous_quantities.get(sku, 0)
+        if diff != 0:
+            product_repository.adjust_inventory(sku, -diff)
+
+    order_repository.update_order(order_id, normalized)
+
+    amount_delta = normalized.total_amount - existing.total_amount
+    if normalized.status != existing.status:
+        description = (
+            f"Order updated. Status changed from {existing.status} to {normalized.status}."
+        )
+    else:
+        description = "Order updated."
+    _log_order_event(normalized, "Updated", description, amount_delta)
+    return normalized
+
+
 def list_recent_orders(limit: int = 50) -> List[Order]:
     return order_repository.fetch_orders(limit)
 
 
 def get_dashboard_snapshot() -> DashboardSnapshot:
-    return order_repository.build_dashboard_snapshot()
+    snapshot = order_repository.build_dashboard_snapshot()
+    normalized_breakdown = _normalize_product_breakdown(snapshot.product_breakdown)
+    return replace(snapshot, product_breakdown=normalized_breakdown)
 
 
 def list_order_statuses() -> List[str]:
@@ -73,6 +132,29 @@ def list_order_report(
     end_date: Optional[date] = None,
 ) -> List[OrderReportRow]:
     return order_repository.fetch_order_report(start_date, end_date)
+
+
+def list_order_destinations() -> List[OrderDestination]:
+    rows = order_repository.fetch_order_destinations()
+    aggregates: Dict[Tuple[str, str], OrderDestination] = {}
+
+    for order_number, _customer_name, address in rows:
+        if not address:
+            continue
+        parsed = _extract_city_state(address)
+        if parsed is None:
+            continue
+        city, state = parsed
+        key = (city, state)
+        destination = aggregates.get(key)
+        if destination is None:
+            destination = OrderDestination(city=city, state=state, count=0)
+            aggregates[key] = destination
+        destination.count += 1
+        destination.order_numbers.append(order_number)
+
+    sorted_destinations = sorted(aggregates.values(), key=lambda item: item.count, reverse=True)
+    return sorted_destinations
 
 
 def build_order(
@@ -102,9 +184,11 @@ def build_order(
         )
         normalized_items.append(cleaned)
 
-    order_number = order_number.strip().upper()
-    if not order_number:
-        order_number = _generate_order_number_from_items(normalized_items)
+    order_number_clean = order_number.strip()
+    if not order_number_clean:
+        order_number_clean = reserve_next_order_number()
+    else:
+        ensure_next_order_number_progress(order_number_clean)
 
     normalized_status = _normalize_status(status)
     normalized_ship_date = ship_date
@@ -118,7 +202,7 @@ def build_order(
         raise ValueError("Target completion date cannot be before the order date")
 
     return Order(
-        order_number=order_number,
+        order_number=order_number_clean,
         customer_name=customer_name.strip(),
         customer_address=customer_address.strip(),
         status=normalized_status,
@@ -158,7 +242,24 @@ def ensure_product_exists(sku: str, name: str) -> Product:
 
 def update_product(product: Product) -> Product:
     normalized_status = _normalize_product_status(product.status)
-    normalized = replace(product, status=normalized_status)
+    normalized_sku = product.sku.strip().upper()
+    if not normalized_sku:
+        raise ValueError("SKU cannot be empty.")
+
+    normalized_name = product.name.strip() or normalized_sku
+    normalized_description = product.description.strip()
+    normalized_photo = product.photo_path.strip()
+    normalized_inventory = max(0, int(product.inventory_count))
+
+    normalized = replace(
+        product,
+        sku=normalized_sku,
+        name=normalized_name,
+        description=normalized_description,
+        photo_path=normalized_photo,
+        inventory_count=normalized_inventory,
+        status=normalized_status,
+    )
     return product_repository.update_product(normalized)
 
 
@@ -215,6 +316,23 @@ def get_app_settings() -> AppSettings:
 def update_app_settings(settings: AppSettings) -> AppSettings:
     settings_repository.set_setting("business_name", settings.business_name.strip())
     settings_repository.set_setting("low_inventory_threshold", str(max(0, settings.low_inventory_threshold)))
+    format_value = settings.order_number_format.strip() or _DEFAULT_ORDER_NUMBER_FORMAT
+    settings_repository.set_setting("order_number_format", format_value)
+    next_value = max(1, int(settings.order_number_next))
+    settings_repository.set_setting("order_number_next", str(next_value))
+    settings_repository.set_setting(
+        "dashboard_show_business_name",
+        "1" if settings.dashboard_show_business_name else "0",
+    )
+    settings_repository.set_setting("dashboard_logo_path", settings.dashboard_logo_path.strip())
+    alignment = settings.dashboard_logo_alignment.strip().lower()
+    if alignment not in _VALID_LOGO_POSITIONS:
+        alignment = "top-left"
+    settings_repository.set_setting("dashboard_logo_alignment", alignment)
+    logo_size = max(24, min(1024, int(settings.dashboard_logo_size)))
+    settings_repository.set_setting("dashboard_logo_size", str(logo_size))
+    settings_repository.set_setting("dashboard_home_city", settings.dashboard_home_city.strip())
+    settings_repository.set_setting("dashboard_home_state", settings.dashboard_home_state.strip().upper()[:2])
     return settings_repository.get_app_settings()
 
 
@@ -288,6 +406,94 @@ def list_notifications(today: Optional[date] = None) -> List[NotificationMessage
 
     notifications.sort(key=lambda item: (item.severity != "critical", item.category, item.message))
     return notifications
+
+
+def _normalize_product_breakdown(rows: Iterable[ProductSalesSummary]) -> List[ProductSalesSummary]:
+    aggregates: Dict[str, _ProductSummaryAccumulator] = {}
+
+    for row in rows:
+        raw_label = row.product_name.strip()
+        sku_candidate, name_candidate = _extract_sku_name(raw_label)
+        normalized_sku = _replace_alias_sku(sku_candidate) if sku_candidate else ""
+        key = normalized_sku.upper() if normalized_sku else raw_label.lower()
+
+        entry = aggregates.get(key)
+        if entry is None:
+            entry = _ProductSummaryAccumulator(
+                sku=normalized_sku,
+                name=name_candidate,
+                fallback=raw_label,
+                quantity=int(row.total_quantity),
+                sales=float(row.total_sales),
+            )
+            aggregates[key] = entry
+        else:
+            entry.quantity += int(row.total_quantity)
+            entry.sales += float(row.total_sales)
+            if not entry.sku and normalized_sku:
+                entry.sku = normalized_sku
+            if not entry.name and name_candidate:
+                entry.name = name_candidate
+            if not entry.fallback and raw_label:
+                entry.fallback = raw_label
+
+    results: List[ProductSalesSummary] = []
+    for entry in aggregates.values():
+        sku = entry.sku.strip()
+        name = entry.name.strip()
+        fallback = entry.fallback.strip()
+
+        if sku and name:
+            label = f"{sku} - {name}"
+        elif sku:
+            label = sku
+        else:
+            label = fallback or name
+
+        results.append(
+            ProductSalesSummary(
+                product_name=label,
+                total_quantity=entry.quantity,
+                total_sales=entry.sales,
+            )
+        )
+
+    results.sort(key=lambda item: (-item.total_sales, item.product_name))
+    return results
+
+
+def _extract_sku_name(label: str) -> Tuple[str, str]:
+    if not label:
+        return "", ""
+
+    cleaned = label.strip()
+    if " - " in cleaned:
+        left, right = cleaned.split(" - ", 1)
+        left = left.strip()
+        right = right.strip()
+        if _looks_like_sku(left):
+            return left, right
+
+    if _looks_like_sku(cleaned):
+        return cleaned, ""
+
+    return "", cleaned
+
+
+def _replace_alias_sku(sku: str) -> str:
+    candidate = sku.strip()
+    if not candidate:
+        return candidate
+    mapped = _SKU_ALIASES.get(candidate.upper())
+    if mapped:
+        return mapped
+    return candidate
+
+
+def _looks_like_sku(value: str) -> bool:
+    if not value:
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9_-]{2,}", value.strip()))
 
 
 def export_order_report(rows: Iterable[OrderReportRow], destination: str) -> Path:
@@ -375,12 +581,60 @@ def _normalize_product_status(status: str) -> str:
     return candidate.title()
 
 
-def _generate_order_number_from_items(items: List[OrderItem]) -> str:
-    sku = next((item.product_sku for item in items if item.product_sku), "")
-    if sku:
-        return order_repository.generate_order_number_for_sku(sku)
-    fallback = items[0].product_name if items else "ORD"
-    return order_repository.generate_order_number_from_prefix(fallback)
+def preview_next_order_number() -> str:
+    fmt, next_value = _get_order_number_configuration()
+    return _format_order_number(fmt, next_value)
+
+
+def reserve_next_order_number() -> str:
+    fmt, next_value = _get_order_number_configuration()
+    order_number = _format_order_number(fmt, next_value)
+    _set_next_order_number(next_value + 1)
+    return order_number
+
+
+def ensure_next_order_number_progress(order_number: str) -> None:
+    if not order_number:
+        return
+    sequence_value = _extract_sequence_value(order_number)
+    if sequence_value is None:
+        return
+    _, current_next = _get_order_number_configuration()
+    if sequence_value >= current_next:
+        _set_next_order_number(sequence_value + 1)
+
+
+def _get_order_number_configuration() -> Tuple[str, int]:
+    fmt = settings_repository.get_setting("order_number_format") or _DEFAULT_ORDER_NUMBER_FORMAT
+    fmt = fmt.strip() or _DEFAULT_ORDER_NUMBER_FORMAT
+    try:
+        next_value = int(settings_repository.get_setting("order_number_next") or "1")
+    except ValueError:
+        next_value = 1
+    return fmt, max(1, next_value)
+
+
+def _set_next_order_number(value: int) -> None:
+    settings_repository.set_setting("order_number_next", str(max(1, value)))
+
+
+def _format_order_number(fmt: str, sequence: int) -> str:
+    try:
+        formatted = fmt.format(seq=sequence)
+    except Exception:
+        formatted = f"{sequence:06d}"
+    formatted = formatted.strip()
+    return formatted or f"{sequence:06d}"
+
+
+def _extract_sequence_value(order_number: str) -> Optional[int]:
+    match = _SEQUENCE_PATTERN.search(order_number)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+    return None
 
 
 def _restock_order_items(order: Order) -> None:
@@ -399,3 +653,35 @@ def _log_order_event(order: Order, event_type: str, description: str, amount_del
         description,
         amount_delta,
     )
+
+
+def _summarize_item_quantities(items: Iterable[OrderItem]) -> Dict[str, int]:
+    totals: Dict[str, int] = {}
+    for item in items:
+        sku = item.product_sku.strip().upper()
+        if not sku:
+            continue
+        totals[sku] = totals.get(sku, 0) + int(item.quantity)
+    return totals
+
+
+def _extract_city_state(address: str) -> Optional[Tuple[str, str]]:
+    normalized = address.replace("\r", "\n")
+    segments = [segment.strip() for segment in normalized.split("\n") if segment.strip()]
+    for segment in reversed(segments):
+        match = _CITY_STATE_PATTERN.search(segment)
+        if match:
+            city = match.group("city").strip()
+            state = match.group("state").strip().upper()
+            if city and state:
+                return city, state
+
+    condensed = " ".join(segments)
+    match = _CITY_STATE_PATTERN.search(condensed)
+    if match:
+        city = match.group("city").strip()
+        state = match.group("state").strip().upper()
+        if city and state:
+            return city, state
+
+    return None
