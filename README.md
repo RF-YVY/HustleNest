@@ -1,6 +1,6 @@
 # HustleNest
 
-Current Version: **v1.1**
+Current Version: **v1.1** **(Download EXE from Releases, no installation needed)**
 
 HustleNest is a desktop application written in Python (PySide6) for tracking product orders, shipping progress, and sales performance. Data is stored locally in a SQLite database that is provisioned automatically on first launch. The interface provides a dashboard, streamlined order entry, detailed reporting, inventory forecasting, and in-app notifications for low stock and overdue orders.
 
@@ -13,6 +13,30 @@ HustleNest is a desktop application written in Python (PySide6) for tracking pro
 - **Reports tab** offering optional date filters, shipment status, export to CSV, and product aggregation matching the dashboard details.
 - **Forecasting analytics** projecting product demand based on recent sales trends.
 - **About page** summarizing capabilities and surfacing update status on launch.
+
+## Dashboard
+<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/d2930b53-abe5-4bb3-a905-2c741db14829" />
+
+## Orders
+<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/08a66791-85a1-4c13-a4cd-bc4bdec6a942" />
+
+## Reports
+<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/f156e5b4-644d-4c9a-b859-9f9247bbd810" />
+
+## History
+<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/77d488bf-95a9-4c44-81f6-31b7f9fe83f2" />
+
+## Product Manager
+<img width="1602" height="1062" alt="Image" src="https://github.com/user-attachments/assets/43a38ea2-8158-4e20-9c2e-31d9c23eb2e4" />
+
+## Graphs
+<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/e6069990-6873-4755-92bf-da67abb9ff32" />
+
+## Mapping
+<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/a1e048b3-af56-4827-a76f-10184aeac569" />
+
+## Settings
+<img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/9e9e3903-c6d8-45b1-8306-c0ea3826932e" />
 
 ## Prerequisites
 
@@ -81,3 +105,4 @@ README.md
 ## License
 
 This project currently has no explicit license. Add one if you plan to distribute the application.
+
