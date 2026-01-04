@@ -1,0 +1,14 @@
+# Generated build artifacts
+build/
+dist/
+
+# Virtual environments
+.venv/
+
+# PyInstaller spec files
+*.spec
+
+# Bytecode cache
+__pycache__/
+*.pyc
+*.pyo
