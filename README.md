@@ -74,36 +74,10 @@ To package HustleNest as a Windows executable named **HustleNest** with the bund
 
 The compiled application is placed in `dist/HustleNest/HustleNest.exe`.
 
-## Project Structure
-
-```
-.github/
-cyberlablog/
-   __init__.py
-   main.py                # PySide6 application entrypoint
-   data/
-      database.py          # SQLite setup and helpers
-      order_repository.py  # Order persistence and analytics queries
-   models/
-      order_models.py      # Dataclasses for orders, items, and reporting DTOs
-   services/
-      order_service.py     # Business logic shared across tabs
-   ui/
-      main_window.py       # Main window with dashboard, orders, and reports tabs
-   viewmodels/
-      table_models.py      # Generic table model for Qt views
-requirements.txt
-README.md
-```
-
-## Roadmap Ideas
-
-- Support editing or canceling existing orders directly from the history tab.
-- Provide PDF export options alongside CSV for external reporting.
-- Integrate additional form validation and inline error indicators for numeric inputs.
-
 ## License
 
 This project currently has no explicit license. Add one if you plan to distribute the application.
 
+## Contact:
+For questions/suggestions/etc email: kd5yvy@gmail.com
 
