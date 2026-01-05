@@ -1,18 +1,24 @@
 # HustleNest
 
-Current Version: **v1.1** **(Download EXE from Releases, no installation needed)**
+Version: **v2.0**
 
-HustleNest is a desktop application written in Python (PySide6) for tracking product orders, shipping progress, and sales performance. Data is stored locally in a SQLite database that is provisioned automatically on first launch. The interface provides a dashboard, streamlined order entry, detailed reporting, inventory forecasting, and in-app notifications for low stock and overdue orders.
+HustleNest is a PySide6 desktop application for tracking product orders, monitoring fulfillment, and visualizing sales performance. All data lives locally in a SQLite database created automatically on first launch. The UI combines dashboards, detailed order entry, forecasting, and reporting tailored for small business workflows.
 
-## Features
+## Highlights
 
-- **Dashboard overview** displaying total sales, outstanding order count, product-level sales totals, and pending shipments.
-- **Order entry workflow** capturing customer information, shipping status, target completion dates, and flexible line items.
-- **Notifications center** surfacing low-inventory warnings and overdue order reminders alongside dashboard metrics.
-- **SQLite-backed storage** with automatic schema creation and pragmatic repository helpers for analytics queries.
-- **Reports tab** offering optional date filters, shipment status, export to CSV, and product aggregation matching the dashboard details.
-- **Forecasting analytics** projecting product demand based on recent sales trends.
-- **About page** summarizing capabilities and surfacing update status on launch.
+- Dashboard with revenue, order pipeline, and inventory insights.
+- Order management with product line items, paid-status toggle, and invoice export.
+- Local SQLite storage with repository helpers for analytics and reporting.
+- Configurable payment methods and branded invoice PDFs generated in-app.
+- Built-in update checker pointed at the HustleNest GitHub repository.
+
+## What's New in 2.0
+
+- Windows installer built with Inno Setup for a streamlined deployment story.
+- PyInstaller bundle refreshed with the HustleNest branding and icon.
+- Invoice manager now supports dynamic payment methods, persistent settings, and a compact layout with totals embedded in the items table.
+- Paid checkbox in the Orders tab syncs with database state without mutating order status.
+- Cost and margin analytics surfaced across dashboards, reports, and exports.
 
 ## Dashboard
 <img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/ac916871-8087-4669-af9e-38a1ccc831f7" />
@@ -38,41 +44,76 @@ HustleNest is a desktop application written in Python (PySide6) for tracking pro
 ## Settings
 <img width="1602" height="1064" alt="Image" src="https://github.com/user-attachments/assets/9e9e3903-c6d8-45b1-8306-c0ea3826932e" />
 
-## Prerequisites
 
-- Windows 10 or later (other OSes supported if PySide6 is available)
-- Python 3.11 or newer
-- pip for dependency installation
+## Installation
 
-## Setup
+### Option 1: Windows Installer (recommended)
 
-1. Create and activate a virtual environment (recommended):
-    ```powershell
-    py -3.11 -m venv .venv
-    .\.venv\Scripts\Activate.ps1
-    ```
-2. Install dependencies:
-    ```powershell
-    pip install -r requirements.txt
-    ```
-3. Initialize the database and launch the application:
-    ```powershell
-    python -m cyberlablog.main
-    ```
+1. Download `HustleNestSetup.exe` from the latest release (or use the build/HustleNestSetup.exe artifact when building locally).
+2. Run the installer and follow the prompts. The default location is `C:\Program Files\HustleNest`.
+3. Launch HustleNest from the Start menu or the optional desktop shortcut.
 
-The first run creates `%LOCALAPPDATA%\HustleNest\hustlenest.db`. Remove that file to reset all data.
+### Option 2: Run from source
 
-HustleNest checks for updates on startup by reaching the GitHub repository (`RF-YVY/HustleNest`). If a newer tag or release exists, the app prompts with a download link.
-
-## Building an Executable
-
-To package HustleNest as a Windows executable named **HustleNest** with the bundled application icon:
+Windows 10 or later with Python 3.11 is required.
 
 ```powershell
-& .venv\Scripts\python.exe -m PyInstaller --name HustleNest --windowed --icon "HustleNest.ico" --add-data "HustleNest.ico;." cyberlablog\main.py
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m cyberlablog.main
 ```
 
-The compiled application is placed in `dist/HustleNest/HustleNest.exe`.
+On first run a database file appears at `%LOCALAPPDATA%\HustleNest\hustlenest.db`. Deleting that file resets all application data.
+
+## Running the App
+
+- Installer build: launch HustleNest from Start > HustleNest > HustleNest.
+- Source build: run `python -m cyberlablog.main` from an activated virtual environment.
+
+Invoices export as PDFs through the Invoice Manager dialog, which launches when you select an order and choose **Export Invoice**.
+
+## Building From Source
+
+To recreate the distributable artifacts:
+
+```powershell
+.\.venv\Scripts\python.exe -m PyInstaller HustleNest.spec
+"C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" installer\HustleNest.iss
+```
+
+The PyInstaller step emits the executable in `dist\HustleNest\HustleNest.exe`. The Inno Setup compiler produces `build\HustleNestSetup.exe`.
+
+## Project Structure
+
+```
+.github/
+cyberlablog/
+   __init__.py
+   main.py                # PySide6 application entry point
+   data/
+      database.py         # SQLite bootstrap and helpers
+      order_repository.py # Persistence and reporting queries
+   models/
+      order_models.py     # Dataclasses for orders, items, and invoice metadata
+   services/
+      order_service.py    # Business logic for invoices and analytics
+   settings/
+      app_settings.py     # Persistent application settings (payment methods, etc.)
+   ui/
+      main_window.py      # Main window with dashboard, orders, reports
+   versioning.py          # Centralized application version constant
+installer/
+   HustleNest.iss         # Inno Setup script
+requirements.txt
+README.md
+```
+
+## Troubleshooting
+
+- If the installer reports missing prerequisites, ensure the Visual C++ redistributables are present (PySide6 bundles the required runtime in the installer build).
+- When running from source, verify the virtual environment is active before installing dependencies or launching the app.
+- Delete `%LOCALAPPDATA%\HustleNest\hustlenest.db` if you need a clean slate for testing.
 
 ## License
 
@@ -101,5 +142,6 @@ SOFTWARE.
 
 ## Contact:
 For questions/suggestions/etc email: kd5yvy@gmail.com
+
 
 
