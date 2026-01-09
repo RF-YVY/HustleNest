@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Dict
+import json
+from typing import Dict, List
 
-from ..models.order_models import AppSettings
+from ..models.order_models import AppSettings, PaymentOption
 from .database import create_connection
 
 _DEFAULTS: Dict[str, str] = {
@@ -16,6 +17,26 @@ _DEFAULTS: Dict[str, str] = {
     "dashboard_logo_size": "160",
     "dashboard_home_city": "",
     "dashboard_home_state": "",
+    "tax_rate_percent": "0",
+    "tax_show_on_invoice": "0",
+    "tax_add_to_total": "0",
+    "invoice_slogan": "",
+    "invoice_street": "",
+    "invoice_city": "",
+    "invoice_state": "",
+    "invoice_zip": "",
+    "invoice_phone": "",
+    "invoice_fax": "",
+    "invoice_terms": "Due on receipt",
+    "invoice_comments": "",
+    "invoice_contact_name": "",
+    "invoice_contact_phone": "",
+    "invoice_contact_email": "",
+    "payment_options": "[]",
+    "payment_paypal": "",
+    "payment_venmo": "",
+    "payment_cash_app": "",
+    "payment_other": "",
 }
 
 
@@ -88,6 +109,66 @@ def get_app_settings() -> AppSettings:
     home_state = get_setting("dashboard_home_state") or _DEFAULTS["dashboard_home_state"]
     legacy_zip = get_setting("dashboard_user_zip") or ""
 
+    invoice_slogan = get_setting("invoice_slogan") or _DEFAULTS["invoice_slogan"]
+    invoice_street = get_setting("invoice_street") or _DEFAULTS["invoice_street"]
+    invoice_city = get_setting("invoice_city") or _DEFAULTS["invoice_city"]
+    invoice_state = get_setting("invoice_state") or _DEFAULTS["invoice_state"]
+    invoice_zip = get_setting("invoice_zip") or _DEFAULTS["invoice_zip"]
+    invoice_phone = get_setting("invoice_phone") or _DEFAULTS["invoice_phone"]
+    invoice_fax = get_setting("invoice_fax") or _DEFAULTS["invoice_fax"]
+    invoice_terms = get_setting("invoice_terms") or _DEFAULTS["invoice_terms"]
+    invoice_comments = get_setting("invoice_comments") or _DEFAULTS["invoice_comments"]
+    invoice_contact_name = get_setting("invoice_contact_name") or _DEFAULTS["invoice_contact_name"]
+    invoice_contact_phone = get_setting("invoice_contact_phone") or _DEFAULTS["invoice_contact_phone"]
+    invoice_contact_email = get_setting("invoice_contact_email") or _DEFAULTS["invoice_contact_email"]
+
+    raw_payment_options = get_setting("payment_options") or _DEFAULTS["payment_options"]
+    try:
+        parsed_payment_options = json.loads(raw_payment_options)
+    except json.JSONDecodeError:
+        parsed_payment_options = []
+
+    payment_options: List[PaymentOption] = []
+    if isinstance(parsed_payment_options, list):
+        for entry in parsed_payment_options:
+            if not isinstance(entry, dict):
+                continue
+            label_text = str(entry.get("label", "")).strip()
+            value_text = str(entry.get("value", "")).strip()
+            if label_text and value_text:
+                payment_options.append(PaymentOption(label=label_text, value=value_text))
+
+    legacy_sources = [
+        ("PayPal", get_setting("payment_paypal")),
+        ("Venmo", get_setting("payment_venmo")),
+        ("Cash App", get_setting("payment_cash_app")),
+    ]
+    existing_labels = {option.label.lower() for option in payment_options}
+    for label_text, raw_value in legacy_sources:
+        value_text = (raw_value or "").strip()
+        if not value_text:
+            continue
+        normalized_label = label_text.strip().lower()
+        if normalized_label not in existing_labels:
+            payment_options.append(PaymentOption(label=label_text, value=value_text))
+            existing_labels.add(normalized_label)
+
+    payment_other = get_setting("payment_other") or _DEFAULTS["payment_other"]
+
+    tax_rate_raw = get_setting("tax_rate_percent")
+    if not tax_rate_raw:
+        tax_rate_raw = _DEFAULTS["tax_rate_percent"]
+    try:
+        tax_rate_percent = max(0.0, min(100.0, float(tax_rate_raw)))
+    except ValueError:
+        tax_rate_percent = 0.0
+
+    show_tax_raw = (get_setting("tax_show_on_invoice") or _DEFAULTS["tax_show_on_invoice"]).strip().lower()
+    tax_show_on_invoice = show_tax_raw not in {"0", "false", "no"}
+
+    include_tax_raw = (get_setting("tax_add_to_total") or _DEFAULTS["tax_add_to_total"]).strip().lower()
+    tax_add_to_total = include_tax_raw not in {"0", "false", "no"}
+
     city_clean = home_city.strip()
     state_clean = home_state.strip().upper()[:2]
 
@@ -111,4 +192,21 @@ def get_app_settings() -> AppSettings:
         dashboard_logo_size=logo_size,
         dashboard_home_city=city_clean,
         dashboard_home_state=state_clean,
+        invoice_slogan=invoice_slogan.strip(),
+        invoice_street=invoice_street.strip(),
+        invoice_city=invoice_city.strip(),
+        invoice_state=invoice_state.strip().upper()[:2],
+        invoice_zip=invoice_zip.strip(),
+        invoice_phone=invoice_phone.strip(),
+        invoice_fax=invoice_fax.strip(),
+        invoice_terms=invoice_terms.strip() or _DEFAULTS["invoice_terms"],
+        invoice_comments=invoice_comments.strip(),
+        invoice_contact_name=invoice_contact_name.strip(),
+        invoice_contact_phone=invoice_contact_phone.strip(),
+        invoice_contact_email=invoice_contact_email.strip(),
+        payment_options=payment_options,
+        payment_other=payment_other.strip(),
+        tax_rate_percent=tax_rate_percent,
+        tax_show_on_invoice=tax_show_on_invoice,
+        tax_add_to_total=tax_add_to_total,
     )

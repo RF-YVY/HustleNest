@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import List, Optional
+import json
+from typing import Iterable, List, Optional
 
-from ..models.order_models import Product
+from ..models.order_models import CostComponent, Product
 from .database import create_connection
 
 
@@ -11,7 +12,18 @@ def list_products() -> List[Product]:
     with create_connection() as connection:
         rows = connection.execute(
             """
-            SELECT id, sku, name, description, photo_path, inventory_count, is_complete, status
+            SELECT
+                id,
+                sku,
+                name,
+                description,
+                photo_path,
+                inventory_count,
+                is_complete,
+                status,
+                base_unit_cost,
+                default_unit_price,
+                pricing_components
             FROM products
             ORDER BY sku ASC
             """
@@ -27,6 +39,9 @@ def list_products() -> List[Product]:
             inventory_count=int(row["inventory_count"]),
             is_complete=bool(row["is_complete"]),
             status=row["status"] or "Ordered",
+            base_unit_cost=float(row["base_unit_cost"] or 0.0),
+            default_unit_price=float(row["default_unit_price"] or 0.0),
+            pricing_components=_deserialize_components(row["pricing_components"]),
         )
         for row in rows
     ]
@@ -40,7 +55,18 @@ def get_product_by_sku(sku: str) -> Optional[Product]:
     with create_connection() as connection:
         row = connection.execute(
             """
-            SELECT id, sku, name, description, photo_path, inventory_count, is_complete, status
+            SELECT
+                id,
+                sku,
+                name,
+                description,
+                photo_path,
+                inventory_count,
+                is_complete,
+                status,
+                base_unit_cost,
+                default_unit_price,
+                pricing_components
             FROM products
             WHERE sku = ?
             """,
@@ -59,6 +85,9 @@ def get_product_by_sku(sku: str) -> Optional[Product]:
         inventory_count=int(row["inventory_count"]),
         is_complete=bool(row["is_complete"]),
         status=row["status"] or "Ordered",
+        base_unit_cost=float(row["base_unit_cost"] or 0.0),
+        default_unit_price=float(row["default_unit_price"] or 0.0),
+        pricing_components=_deserialize_components(row["pricing_components"]),
     )
 
 
@@ -71,9 +100,17 @@ def create_product(sku: str, name: str, *, mark_complete: bool = False) -> Produ
         cursor = connection.cursor()
         cursor.execute(
             """
-            INSERT INTO products (sku, name, is_complete, status)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(sku) DO UPDATE SET name = excluded.name
+            INSERT INTO products (
+                sku,
+                name,
+                is_complete,
+                status,
+                base_unit_cost,
+                default_unit_price,
+                pricing_components
+            ) VALUES (?, ?, ?, ?, 0, 0, '[]')
+            ON CONFLICT(sku) DO UPDATE SET
+                name = excluded.name
             """,
             (sku, name.strip() or sku, int(mark_complete), "Ordered"),
         )
@@ -95,6 +132,9 @@ def update_product(product: Product) -> Product:
         raise ValueError("SKU is required")
 
     try:
+        description = (product.description or "").strip()
+        photo_path = (product.photo_path or "").strip()
+        status = (product.status or "Ordered").strip() or "Ordered"
         with create_connection() as connection:
             connection.execute(
                 """
@@ -105,17 +145,23 @@ def update_product(product: Product) -> Product:
                     photo_path = ?,
                     inventory_count = ?,
                     is_complete = ?,
-                    status = ?
+                    status = ?,
+                    base_unit_cost = ?,
+                    default_unit_price = ?,
+                    pricing_components = ?
                 WHERE id = ?
                 """,
                 (
                     sku,
                     product.name.strip() or sku,
-                    product.description.strip(),
-                    product.photo_path.strip(),
+                    description,
+                    photo_path,
                     max(0, int(product.inventory_count)),
                     int(product.is_complete),
-                    product.status.strip() or "Ordered",
+                    status,
+                    float(product.base_unit_cost),
+                    float(product.default_unit_price),
+                    _serialize_components(product.pricing_components),
                     int(product.id),
                 ),
             )
@@ -130,7 +176,18 @@ def get_product_by_id(product_id: int) -> Optional[Product]:
     with create_connection() as connection:
         row = connection.execute(
             """
-            SELECT id, sku, name, description, photo_path, inventory_count, is_complete, status
+            SELECT
+                id,
+                sku,
+                name,
+                description,
+                photo_path,
+                inventory_count,
+                is_complete,
+                status,
+                base_unit_cost,
+                default_unit_price,
+                pricing_components
             FROM products
             WHERE id = ?
             """,
@@ -149,6 +206,9 @@ def get_product_by_id(product_id: int) -> Optional[Product]:
         inventory_count=int(row["inventory_count"]),
         is_complete=bool(row["is_complete"]),
         status=row["status"] or "Ordered",
+        base_unit_cost=float(row["base_unit_cost"] or 0.0),
+        default_unit_price=float(row["default_unit_price"] or 0.0),
+        pricing_components=_deserialize_components(row["pricing_components"]),
     )
 
 
@@ -196,3 +256,41 @@ def delete_product(product_id: int) -> None:
     with create_connection() as connection:
         connection.execute("DELETE FROM products WHERE id = ?", (int(product_id),))
         connection.commit()
+
+
+def _deserialize_components(raw: object) -> List[CostComponent]:
+    if raw is None:
+        return []
+    text = str(raw).strip()
+    if not text:
+        return []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    components: List[CostComponent] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label", "")).strip()
+        amount = entry.get("amount", 0)
+        try:
+            amount_value = float(amount)
+        except (TypeError, ValueError):
+            amount_value = 0.0
+        if not label and amount_value == 0.0:
+            continue
+        components.append(CostComponent(label=label, amount=amount_value))
+    return components
+
+
+def _serialize_components(components: Iterable[CostComponent]) -> str:
+    payload = [
+        {
+            "label": component.label,
+            "amount": float(component.amount),
+        }
+        for component in components
+    ]
+    return json.dumps(payload)

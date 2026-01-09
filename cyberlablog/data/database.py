@@ -20,6 +20,11 @@ def get_database_path() -> Path:
     return _get_storage_directory() / _DB_FILE
 
 
+def get_storage_root() -> Path:
+    """Return the application data directory used for persistent assets."""
+    return _get_storage_directory()
+
+
 def create_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(get_database_path())
     connection.row_factory = sqlite3.Row
@@ -47,7 +52,10 @@ def initialize() -> None:
                 photo_path TEXT NOT NULL DEFAULT '',
                 inventory_count INTEGER NOT NULL DEFAULT 0,
                 is_complete INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'Ordered'
+                status TEXT NOT NULL DEFAULT 'Ordered',
+                base_unit_cost REAL NOT NULL DEFAULT 0,
+                default_unit_price REAL NOT NULL DEFAULT 0,
+                pricing_components TEXT NOT NULL DEFAULT '[]'
             );
 
             CREATE TABLE IF NOT EXISTS settings (
@@ -63,8 +71,10 @@ def initialize() -> None:
                 order_date TEXT NOT NULL,
                 ship_date TEXT,
                 status TEXT NOT NULL,
+                is_paid INTEGER NOT NULL DEFAULT 0,
                 carrier TEXT NOT NULL DEFAULT '',
                 tracking_number TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
                 total_amount REAL NOT NULL DEFAULT 0,
                 target_completion_date TEXT
             );
@@ -78,6 +88,11 @@ def initialize() -> None:
                 product_description TEXT NOT NULL DEFAULT '',
                 quantity INTEGER NOT NULL,
                 unit_price REAL NOT NULL,
+                base_unit_cost REAL NOT NULL DEFAULT 0,
+                cost_components TEXT NOT NULL DEFAULT '[]',
+                applied_discount REAL NOT NULL DEFAULT 0,
+                applied_tax REAL NOT NULL DEFAULT 0,
+                price_adjustment_note TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,
                 FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE SET NULL
             );
@@ -107,8 +122,22 @@ def initialize() -> None:
         _ensure_column(connection, "order_items", "product_id", "INTEGER")
         _ensure_column(connection, "orders", "carrier", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "orders", "tracking_number", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "orders", "notes", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "products", "status", "TEXT NOT NULL DEFAULT 'Ordered'")
         _ensure_column(connection, "orders", "target_completion_date", "TEXT")
+        _ensure_column(connection, "orders", "is_paid", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "orders", "tax_rate", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "orders", "tax_amount", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "orders", "tax_included_in_total", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "products", "base_unit_cost", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "products", "default_unit_price", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "products", "pricing_components", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(connection, "order_items", "base_unit_cost", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "order_items", "cost_components", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(connection, "order_items", "is_freebie", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "order_items", "applied_discount", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "order_items", "applied_tax", "REAL NOT NULL DEFAULT 0")
+        _ensure_column(connection, "order_items", "price_adjustment_note", "TEXT NOT NULL DEFAULT ''")
 
         cursor.close()
         connection.commit()

@@ -4,7 +4,7 @@ import json
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, cast
 from urllib.error import URLError, HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QTableView,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QTextBrowser,
     QTextEdit,
@@ -40,15 +42,75 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from ..models.order_models import AppSettings, NotificationMessage, Order, OrderItem, OrderReportRow, Product
+from ..models.order_models import AppSettings, CostComponent, NotificationMessage, Order, OrderItem, OrderReportRow, Product
 from ..resources import get_app_icon_path
 from ..services import order_service
 from ..versioning import APP_VERSION, RELEASES_URL, REPOSITORY_URL, check_for_updates
 from ..viewmodels.table_models import ListTableModel
+from .cost_component_dialog import CostComponentEditorDialog
 from .product_manager import ProductManagerDialog
+from .invoice_manager import InvoiceManagerDialog
 
 
 APP_NAME = "HustleNest"
+
+STATE_CODE_TO_NAME: Dict[str, str] = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+    "DC": "District of Columbia",
+}
+
+US_STATES_GEOJSON_URL = (
+    "https://cdn.jsdelivr.net/gh/PublicaMundi/MappingAPI@master/data/geojson/us-states.json"
+)
 
 
 class MainWindow(QMainWindow):
@@ -63,6 +125,7 @@ class MainWindow(QMainWindow):
         self._recent_orders_cache: List[Order] = []
         self._selected_order: Optional[Order] = None
         self._editing_order_id: Optional[int] = None
+        self._current_cost_components: List[CostComponent] = []
         self._app_settings: AppSettings = order_service.get_app_settings()
         self._status_options: List[str] = order_service.list_order_statuses()
         self._product_status_options: List[str] = order_service.list_product_statuses()
@@ -92,6 +155,7 @@ class MainWindow(QMainWindow):
         self._tab_widget.addTab(self._about_tab, "About")
 
         self._total_sales_label: QLabel
+        self._net_sales_label: QLabel
         self._outstanding_label: QLabel
         self._completed_label: QLabel
         self._product_model: ListTableModel
@@ -112,15 +176,24 @@ class MainWindow(QMainWindow):
         self._order_number_input: QLineEdit
         self._customer_name_input: QLineEdit
         self._customer_address_input: QTextEdit
+        self._order_notes_input: QTextEdit
         self._order_date_input: QDateEdit
         self._ship_date_input: QDateEdit
         self._target_completion_input: QDateEdit
         self._status_input: QComboBox
+        self._paid_checkbox: QCheckBox
         self._product_combo: QComboBox
         self._product_description_input: QLineEdit
         self._quantity_input: QSpinBox
         self._unit_price_input: QDoubleSpinBox
+        self._base_cost_input: QDoubleSpinBox
         self._line_price_type: QComboBox
+        self._add_item_button: QPushButton
+        self._edit_item_button: QPushButton
+        self._cancel_edit_item_button: QPushButton
+        self._remove_item_button: QPushButton
+        self._cost_summary_label: QLabel
+        self._margin_preview_label: QLabel
         self._pending_items_model: ListTableModel
         self._pending_items_table: QTableView
         self._recent_orders_model: ListTableModel
@@ -135,6 +208,12 @@ class MainWindow(QMainWindow):
         self._map_status_label: QLabel
         self._map_view: QWebEngineView
         self._geocode_cache: Dict[str, Tuple[float, float]] = {}
+        self._map_lines_checkbox: QCheckBox
+        self._map_line_style: QComboBox
+        self._map_line_color: QComboBox
+        self._map_line_pattern: QComboBox
+        self._map_base_layer_combo: QComboBox
+        self._map_territory_checkbox: QCheckBox
 
         self._report_start_date: QDateEdit
         self._report_end_date: QDateEdit
@@ -144,6 +223,7 @@ class MainWindow(QMainWindow):
         self._reports_header_label: QLabel
         self._report_summary_label: QLabel
         self._report_export_button: QPushButton
+        self._editing_line_index: Optional[int] = None
         self._current_report_rows: List[OrderReportRow] = []
 
         self._history_model: ListTableModel
@@ -164,6 +244,9 @@ class MainWindow(QMainWindow):
         self._logo_size_input: QSpinBox
         self._home_city_input: QLineEdit
         self._home_state_input: QLineEdit
+        self._tax_rate_input: QDoubleSpinBox
+        self._tax_show_invoice_checkbox: QCheckBox
+        self._tax_include_total_checkbox: QCheckBox
 
         self._chart_view: QChartView
         self._completed_table: QTableView
@@ -224,6 +307,10 @@ class MainWindow(QMainWindow):
         self._total_sales_label = QLabel("Total Sales: $0.00")
         self._total_sales_label.setStyleSheet("font-size: 22px; font-weight: bold;")
         header_layout.addWidget(self._total_sales_label)
+
+        self._net_sales_label = QLabel("Net Revenue: $0.00 (Freebies: $0.00)")
+        self._net_sales_label.setStyleSheet("font-size: 22px; font-weight: bold;")
+        header_layout.addWidget(self._net_sales_label)
 
         self._outstanding_label = QLabel("Outstanding Orders: 0")
         self._outstanding_label.setStyleSheet("font-size: 22px; font-weight: bold;")
@@ -302,7 +389,10 @@ class MainWindow(QMainWindow):
                     if getattr(row, "target_completion_date", None)
                     else "",
                 ),
-                ("Total", lambda row: f"${getattr(row, 'total_amount', 0):,.2f}"),
+                (
+                    "Total",
+                    lambda row, mw=self: f"${getattr(row, 'total_amount', 0.0) + (getattr(row, 'tax_amount', 0.0) if getattr(mw._app_settings, 'tax_add_to_total', False) else 0.0):,.2f}",
+                ),
                 ("Status", lambda row: getattr(row, "status", "")),
                 ("Carrier", lambda row: getattr(row, "carrier", "")),
                 ("Tracking #", lambda row: getattr(row, "tracking_number", "")),
@@ -328,7 +418,10 @@ class MainWindow(QMainWindow):
                     if getattr(row, "target_completion_date", None)
                     else "",
                 ),
-                ("Total", lambda row: f"${getattr(row, 'total_amount', 0):,.2f}"),
+                (
+                    "Total",
+                    lambda row, mw=self: f"${getattr(row, 'total_amount', 0.0) + (getattr(row, 'tax_amount', 0.0) if getattr(mw._app_settings, 'tax_add_to_total', False) else 0.0):,.2f}",
+                ),
                 ("Carrier", lambda row: getattr(row, "carrier", "")),
                 ("Tracking #", lambda row: getattr(row, "tracking_number", "")),
             )
@@ -392,7 +485,14 @@ class MainWindow(QMainWindow):
         form_layout.addRow("Target Complete By", self._target_completion_input)
 
         self._status_input = QComboBox()
+        if self._status_options:
+            self._status_input.addItems(self._status_options)
         form_layout.addRow("Status", self._status_input)
+        self._status_input.currentTextChanged.connect(self._on_status_changed)
+
+        self._paid_checkbox = QCheckBox("Mark order as paid")
+        self._paid_checkbox.stateChanged.connect(self._on_paid_checkbox_changed)
+        form_layout.addRow("", self._paid_checkbox)
 
         self._carrier_input = QLineEdit()
         self._carrier_input.setPlaceholderText("Carrier (e.g., UPS)")
@@ -402,32 +502,73 @@ class MainWindow(QMainWindow):
         self._tracking_input.setPlaceholderText("Tracking Number")
         form_layout.addRow("Tracking #", self._tracking_input)
 
+        self._order_notes_input = QTextEdit()
+        self._order_notes_input.setPlaceholderText("Internal notes for this order")
+        self._order_notes_input.setFixedHeight(80)
+        form_layout.addRow("Notes", self._order_notes_input)
+
         product_selection_layout = QHBoxLayout()
         layout.addLayout(product_selection_layout)
+
+        def make_labeled_container(label_text: str, widget: QWidget) -> QWidget:
+            container = QWidget()
+            column = QVBoxLayout()
+            column.setContentsMargins(0, 0, 0, 0)
+            column.setSpacing(2)
+            label = QLabel(label_text)
+            column.addWidget(label)
+            column.addWidget(widget)
+            container.setLayout(column)
+            return container
 
         self._product_combo = QComboBox()
         self._product_combo.setEditable(True)
         self._product_combo.setPlaceholderText("Select or type a product")
         self._product_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        product_selection_layout.addWidget(self._product_combo, stretch=3)
+        self._product_combo.setToolTip("Choose a product by name or SKU to populate the line item.")
+        self._product_combo.currentIndexChanged.connect(self._on_product_combo_index_changed)
+        product_selection_layout.addWidget(
+            make_labeled_container("Select Product", self._product_combo),
+            stretch=3,
+        )
 
         self._product_description_input = QLineEdit()
         self._product_description_input.setPlaceholderText("Line item description")
-        product_selection_layout.addWidget(self._product_description_input, stretch=3)
+        self._product_description_input.setToolTip("Optional description that appears on the invoice line item.")
+        product_selection_layout.addWidget(
+            make_labeled_container("Line Description", self._product_description_input),
+            stretch=3,
+        )
 
         self._quantity_input = QSpinBox()
         self._quantity_input.setMinimum(1)
         self._quantity_input.setMaximum(1_000_000)
         self._quantity_input.setValue(1)
-        product_selection_layout.addWidget(self._quantity_input)
+        self._quantity_input.setToolTip("Number of units to include for this product.")
+        self._quantity_input.valueChanged.connect(lambda _value: self._refresh_margin_preview())
+        product_selection_layout.addWidget(make_labeled_container("Quantity", self._quantity_input))
 
         self._unit_price_input = QDoubleSpinBox()
         self._unit_price_input.setPrefix("$")
         self._unit_price_input.setDecimals(2)
         self._unit_price_input.setMaximum(1_000_000)
         self._unit_price_input.setValue(0.00)
+        self._unit_price_input.setToolTip("Customer-facing unit price for this line item.")
         self._unit_price_input.valueChanged.connect(self._on_unit_price_changed)
-        product_selection_layout.addWidget(self._unit_price_input)
+        product_selection_layout.addWidget(
+            make_labeled_container("Unit Price (customer)", self._unit_price_input)
+        )
+
+        self._base_cost_input = QDoubleSpinBox()
+        self._base_cost_input.setPrefix("$")
+        self._base_cost_input.setDecimals(2)
+        self._base_cost_input.setMaximum(1_000_000)
+        self._base_cost_input.setValue(0.00)
+        self._base_cost_input.setToolTip("Default product cost used for margin calculations.")
+        self._base_cost_input.valueChanged.connect(self._refresh_margin_preview)
+        product_selection_layout.addWidget(
+            make_labeled_container("Base Cost (default)", self._base_cost_input)
+        )
 
         self._line_price_type = QComboBox()
         self._line_price_type.addItems(["Standard", "FREEBIE"])
@@ -435,17 +576,43 @@ class MainWindow(QMainWindow):
         self._line_price_type.currentTextChanged.connect(self._on_price_type_changed)
         product_selection_layout.addWidget(self._line_price_type)
 
-        add_item_button = QPushButton("Add Item")
-        add_item_button.clicked.connect(self._handle_add_item)
-        product_selection_layout.addWidget(add_item_button)
+        self._add_item_button = QPushButton("Add Item")
+        self._add_item_button.clicked.connect(self._handle_add_item)
+        product_selection_layout.addWidget(self._add_item_button)
 
-        remove_item_button = QPushButton("Remove Selected")
-        remove_item_button.clicked.connect(self._handle_remove_item)
-        product_selection_layout.addWidget(remove_item_button)
+        self._edit_item_button = QPushButton("Edit Selected")
+        self._edit_item_button.clicked.connect(self._handle_edit_item)
+        self._edit_item_button.setEnabled(False)
+        product_selection_layout.addWidget(self._edit_item_button)
+
+        self._cancel_edit_item_button = QPushButton("Cancel Edit")
+        self._cancel_edit_item_button.clicked.connect(self._handle_cancel_item_edit)
+        self._cancel_edit_item_button.setVisible(False)
+        product_selection_layout.addWidget(self._cancel_edit_item_button)
+
+        self._remove_item_button = QPushButton("Remove Selected")
+        self._remove_item_button.clicked.connect(self._handle_remove_item)
+        self._remove_item_button.setEnabled(False)
+        product_selection_layout.addWidget(self._remove_item_button)
 
         manage_products_button = QPushButton("Manage Products")
         manage_products_button.clicked.connect(self._open_product_manager)
         product_selection_layout.addWidget(manage_products_button)
+
+        cost_layout = QHBoxLayout()
+        layout.addLayout(cost_layout)
+
+        self._cost_components_button = QPushButton("Extra Costs…")
+        self._cost_components_button.clicked.connect(self._open_cost_component_editor)
+        cost_layout.addWidget(self._cost_components_button)
+
+        self._cost_summary_label = QLabel("Extras: $0.00")
+        cost_layout.addWidget(self._cost_summary_label)
+
+        self._margin_preview_label = QLabel("Unit Cost: $0.00 | Profit/unit: $0.00 | Margin: --")
+        cost_layout.addWidget(self._margin_preview_label)
+
+        cost_layout.addStretch(1)
 
         items_layout = QHBoxLayout()
         layout.addLayout(items_layout, stretch=1)
@@ -457,18 +624,33 @@ class MainWindow(QMainWindow):
                 ("Description", lambda row: getattr(row, "product_description", "")),
                 ("Quantity", lambda row: getattr(row, "quantity", "")),
                 ("Unit Price", lambda row: f"${getattr(row, 'unit_price', 0):,.2f}"),
+                ("Unit Cost", lambda row: f"${getattr(row, 'unit_cost', 0):,.2f}"),
+                ("Line Cost", lambda row: f"${getattr(row, 'line_cost', 0):,.2f}"),
                 ("Line Total", lambda row: f"${getattr(row, 'line_total', 0):,.2f}"),
+                ("Profit", lambda row: f"${getattr(row, 'line_profit', 0):,.2f}"),
+                (
+                    "Margin",
+                    lambda row: f"{getattr(row, 'margin', 0) * 100:,.1f}%"
+                    if getattr(row, "line_total", 0) else "--",
+                ),
+                ("Adjustments", lambda row: getattr(row, "adjustment_summary", "")),
             )
         )
         self._pending_items_table = QTableView()
         self._pending_items_table.setModel(self._pending_items_model)
         self._configure_table(self._pending_items_table)
-        items_layout.addWidget(self._wrap_group("Pending Items", self._pending_items_table), stretch=3)
+        pending_selection = self._pending_items_table.selectionModel()
+        if pending_selection is not None:
+            pending_selection.selectionChanged.connect(self._on_pending_items_selection_changed)
+        self._update_item_action_buttons()
+
+        items_layout.addWidget(self._wrap_group("Order Items", self._pending_items_table), stretch=2)
 
         self._recent_orders_model = ListTableModel(
             (
                 ("Order #", lambda row: getattr(row, "order_number", "")),
                 ("Customer", lambda row: getattr(row, "customer_name", "")),
+                ("Items", lambda row, mw=self: mw._format_order_items_brief(row)),
                 (
                     "Order Date",
                     lambda row: getattr(row, "order_date", date.min).strftime("%Y-%m-%d")
@@ -484,13 +666,16 @@ class MainWindow(QMainWindow):
                 ("Status", lambda row: getattr(row, "status", "")),
                 ("Carrier", lambda row: getattr(row, "carrier", "")),
                 ("Tracking #", lambda row: getattr(row, "tracking_number", "")),
-                ("Total", lambda row: f"${getattr(row, 'total_amount', 0):,.2f}"),
+                (
+                    "Total",
+                    lambda row, mw=self: f"${getattr(row, 'total_amount', 0.0) + (getattr(row, 'tax_amount', 0.0) if getattr(mw._app_settings, 'tax_add_to_total', False) else 0.0):,.2f}",
+                ),
             )
         )
         self._recent_orders_table = QTableView()
         self._recent_orders_table.setModel(self._recent_orders_model)
         self._configure_table(self._recent_orders_table)
-        items_layout.addWidget(self._wrap_group("Recent Orders", self._recent_orders_table), stretch=2)
+        items_layout.addWidget(self._wrap_group("Recent Orders", self._recent_orders_table), stretch=3)
 
         recent_selection = self._recent_orders_table.selectionModel()
         if recent_selection is not None:
@@ -511,6 +696,11 @@ class MainWindow(QMainWindow):
         refresh_orders_button.clicked.connect(self._load_recent_orders)
         controls_layout.addWidget(refresh_orders_button)
 
+        self._export_invoice_button = QPushButton("Export Invoice")
+        self._export_invoice_button.clicked.connect(self._handle_export_invoice)
+        self._export_invoice_button.setEnabled(False)
+        controls_layout.addWidget(self._export_invoice_button)
+
         self._cancel_order_button = QPushButton("Cancel Order")
         self._cancel_order_button.clicked.connect(self._handle_cancel_order)
         self._cancel_order_button.setEnabled(False)
@@ -525,6 +715,7 @@ class MainWindow(QMainWindow):
 
         self._order_status_label = QLabel()
         controls_layout.addWidget(self._order_status_label)
+        self._update_cost_summary()
 
     # Reports tab
     def _build_reports_tab(self) -> None:
@@ -596,7 +787,31 @@ class MainWindow(QMainWindow):
                 ("Carrier", lambda row: getattr(row, "carrier", "")),
                 ("Tracking #", lambda row: getattr(row, "tracking_number", "")),
                 ("Items", lambda row: getattr(row, "item_count", 0)),
-                ("Total", lambda row: f"${getattr(row, 'total_amount', 0):,.2f}"),
+                (
+                    "Total (Displayed)",
+                    lambda row, mw=self: f"${getattr(row, 'total_amount', 0.0) + (getattr(row, 'tax_amount', 0.0) if getattr(mw._app_settings, 'tax_add_to_total', False) else 0.0):,.2f}",
+                ),
+                (
+                    "Tax",
+                    lambda row: f"${getattr(row, 'tax_amount', 0.0):,.2f}",
+                ),
+                (
+                    "Freebie Cost",
+                    lambda row: f"${getattr(row, 'freebie_cost', 0):,.2f}",
+                ),
+                (
+                    "Net Revenue",
+                    lambda row: f"${getattr(row, 'net_revenue', getattr(row, 'total_amount', 0) - getattr(row, 'freebie_cost', 0)):,.2f}",
+                ),
+                ("Cost", lambda row: f"${getattr(row, 'total_cost', 0):,.2f}"),
+                ("Profit", lambda row: f"${getattr(row, 'profit', 0):,.2f}"),
+                (
+                    "Margin",
+                    lambda row: f"{getattr(row, 'margin', 0) * 100:,.1f}%"
+                    if getattr(row, "total_amount", 0)
+                    else "--",
+                ),
+                ("Adjustments", lambda row: getattr(row, "adjustment_summary", "")),
                 ("Products", lambda row: getattr(row, "products", "")),
             )
         )
@@ -627,13 +842,13 @@ class MainWindow(QMainWindow):
         self._history_start_filter = QDateEdit()
         self._history_start_filter.setCalendarPopup(True)
         self._history_start_filter.setSpecialValueText("Start Date")
-        self._history_start_filter.setDate(QDate())
+        self._history_start_filter.setDate(QDate.currentDate())
         filter_layout.addWidget(self._history_start_filter)
 
         self._history_end_filter = QDateEdit()
         self._history_end_filter.setCalendarPopup(True)
         self._history_end_filter.setSpecialValueText("End Date")
-        self._history_end_filter.setDate(QDate())
+        self._history_end_filter.setDate(QDate.currentDate())
         filter_layout.addWidget(self._history_end_filter)
 
         apply_button = QPushButton("Apply Filters")
@@ -678,8 +893,8 @@ class MainWindow(QMainWindow):
 
     def _clear_history_filters(self) -> None:
         self._history_order_filter.clear()
-        self._history_start_filter.setDate(QDate())
-        self._history_end_filter.setDate(QDate())
+        self._history_start_filter.setDate(QDate.currentDate())
+        self._history_end_filter.setDate(QDate.currentDate())
         self._load_history()
 
     def _load_history(self) -> None:
@@ -789,6 +1004,22 @@ class MainWindow(QMainWindow):
         self._home_state_input.editingFinished.connect(self._normalize_home_state_input)
         self._home_city_input.editingFinished.connect(self._normalize_home_city_input)
 
+        self._tax_rate_input = QDoubleSpinBox()
+        self._tax_rate_input.setRange(0.0, 100.0)
+        self._tax_rate_input.setDecimals(2)
+        self._tax_rate_input.setSingleStep(0.1)
+        self._tax_rate_input.setSuffix(" %")
+        self._tax_rate_input.setValue(self._app_settings.tax_rate_percent)
+        form_layout.addRow("Sales Tax Rate", self._tax_rate_input)
+
+        self._tax_show_invoice_checkbox = QCheckBox("Show tax line on invoices")
+        self._tax_show_invoice_checkbox.setChecked(self._app_settings.tax_show_on_invoice)
+        form_layout.addRow("Invoice Tax Display", self._tax_show_invoice_checkbox)
+
+        self._tax_include_total_checkbox = QCheckBox("Include tax in totals")
+        self._tax_include_total_checkbox.setChecked(self._app_settings.tax_add_to_total)
+        form_layout.addRow("Totals Preference", self._tax_include_total_checkbox)
+
         logo_path_container = QWidget()
         logo_path_layout = QHBoxLayout()
         logo_path_layout.setContentsMargins(0, 0, 0, 0)
@@ -845,6 +1076,11 @@ class MainWindow(QMainWindow):
         self._order_number_next_input.setValue(self._app_settings.order_number_next)
         form_layout.addRow("Next Order #", self._order_number_next_input)
 
+        invoice_button = QPushButton("Open Invoice Manager")
+        invoice_button.setFixedWidth(200)
+        invoice_button.clicked.connect(self._open_invoice_manager)
+        layout.addWidget(invoice_button, alignment=Qt.AlignmentFlag.AlignLeft)
+
         format_hint = QLabel("Use {seq} as the placeholder, e.g., 'ORD-{seq:04d}'.")
         format_hint.setWordWrap(True)
         format_hint.setStyleSheet("color: #555; font-size: 11px;")
@@ -880,7 +1116,8 @@ class MainWindow(QMainWindow):
             "and launch directly into product management or order editing. Configure the branding banner in Settings to display your business name and logo.</p>"
             "<h4>Orders</h4>"
             "<p>Create new orders, maintain drafts, or edit existing ones. Add products, mark FREEBIE line items, set target completion dates, "
-            "and capture shipping details. Use the Recent Orders list to select an order for editing, cancelling, or deletion.</p>"
+            "and capture shipping details. The Order Items table now refreshes instantly when you pick an existing order, and the widened Recent Orders "
+            "list highlights the attached products for quick triage before you begin editing.</p>"
             "<h4>Products</h4>"
             "<p>Open the Product Manager dialog to add new SKUs, adjust inventory, update statuses, or upload supporting details. "
             "Products created on the fly from the Orders tab can be completed here later.</p>"
@@ -903,6 +1140,12 @@ class MainWindow(QMainWindow):
             "<li>Monitor dashboards, low-inventory alerts, and overdue order notifications in one control center.</li>"
             "<li>Review customer history, sales analytics, and exportable reports for bookkeeping.</li>"
             "<li>Forecast inventory needs from recent sales velocity to stay ahead of demand.</li>"
+            "</ul>"
+            "<h3>Recent Enhancements</h3>"
+            "<ul>"
+            "<li>Saving an existing order now clears the selection so the form is primed for the next entry without manual resets.</li>"
+            "<li>Orders tab inputs call out where to pick products, set quantities, and review pricing with fresh inline labels and tooltips.</li>"
+            "<li>Invoice exports drop the starter placeholder comment, ensuring PDFs only include your saved messaging.</li>"
             "</ul>"
             f"<p>Project home: <a href=\"{REPOSITORY_URL}\">{REPOSITORY_URL}</a></p>"
         )
@@ -1018,7 +1261,16 @@ class MainWindow(QMainWindow):
     def refresh_dashboard(self) -> None:
         self._update_dashboard_branding()
         snapshot = order_service.get_dashboard_snapshot()
-        self._total_sales_label.setText(f"Total Sales: ${snapshot.total_sales:,.2f}")
+        displayed_sales = snapshot.total_sales + (snapshot.tax_total if getattr(self._app_settings, "tax_add_to_total", False) else 0.0)
+        self._total_sales_label.setText(f"Total Sales: ${displayed_sales:,.2f}")
+        if getattr(self._app_settings, "tax_add_to_total", False):
+            self._total_sales_label.setToolTip("Includes collected tax based on Settings preferences.")
+        else:
+            self._total_sales_label.setToolTip("Excludes collected tax; see Net Revenue for context.")
+        self._net_sales_label.setText(
+            f"Net Revenue: ${snapshot.net_sales:,.2f} (Freebies: ${snapshot.freebie_cost:,.2f} | Tax: ${snapshot.tax_total:,.2f})"
+        )
+        self._net_sales_label.setToolTip("Net revenue remains pre-tax to track true earnings; tax tracked separately.")
         self._outstanding_label.setText(f"Outstanding Orders: {snapshot.outstanding_orders}")
         self._completed_label.setText(f"Completed Orders: {snapshot.completed_orders}")
         self._product_model.update_rows(snapshot.product_breakdown)
@@ -1032,15 +1284,53 @@ class MainWindow(QMainWindow):
         self._load_history()
         self._refresh_map()
 
-    def _load_recent_orders(self) -> None:
+    def _load_recent_orders(self, *, select_order_id: Optional[int] = None) -> None:
         orders = order_service.list_recent_orders()
         self._recent_orders_cache = orders
         self._recent_orders_model.update_rows(self._recent_orders_cache)
-        if hasattr(self, "_recent_orders_table"):
-            self._start_new_order(clear_status=False)
-        else:
-            self._selected_order = None
-            self._editing_order_id = None
+
+        target_id: Optional[int] = None
+        if select_order_id is not None:
+            target_id = int(select_order_id)
+        elif self._selected_order is not None and getattr(self._selected_order, "id", None) is not None:
+            target_id = int(self._selected_order.id)  # type: ignore[arg-type]
+
+        selected = False
+        if target_id is not None:
+            for row, order in enumerate(orders):
+                order_id_value = getattr(order, "id", None)
+                if order_id_value is None:
+                    continue
+                if int(order_id_value) != target_id:
+                    continue
+
+                persisted = order_service.fetch_order(target_id)
+                resolved_order = persisted or order
+                self._selected_order = resolved_order
+                self._editing_order_id = getattr(resolved_order, "id", None)
+
+                if hasattr(self, "_recent_orders_table"):
+                    table = self._recent_orders_table
+                    selection_model = table.selectionModel()
+                    if selection_model is not None:
+                        blocker = QSignalBlocker(selection_model)
+                        table.selectRow(row)
+                        del blocker
+                    else:
+                        table.selectRow(row)
+                    table.scrollTo(table.model().index(row, 0))
+
+                self._load_order_into_form(resolved_order)
+                selected = True
+                break
+
+        if not selected and select_order_id is None:
+            if hasattr(self, "_recent_orders_table"):
+                self._start_new_order(clear_status=False)
+            else:
+                self._selected_order = None
+                self._editing_order_id = None
+
         self._update_order_action_buttons()
 
     def _handle_new_order(self) -> None:
@@ -1064,19 +1354,44 @@ class MainWindow(QMainWindow):
             self._pending_items_table.clearSelection()
 
         self._clear_order_form()
-        if hasattr(self, "_product_combo"):
-            self._product_combo.setCurrentIndex(-1)
-            self._product_combo.setCurrentText("")
-        if hasattr(self, "_product_description_input"):
-            self._product_description_input.clear()
-        if hasattr(self, "_quantity_input"):
-            self._quantity_input.setValue(1)
-        if hasattr(self, "_unit_price_input"):
-            self._unit_price_input.setValue(0.00)
+        self._set_item_editing_mode(None)
+        self._clear_line_item_inputs()
+        self._update_item_action_buttons()
 
         if clear_status and hasattr(self, "_order_status_label"):
             self._order_status_label.setStyleSheet("")
             self._order_status_label.clear()
+
+    def _format_order_items_brief(self, order: object) -> str:
+        items = getattr(order, "items", None)
+        if not items:
+            return ""
+
+        parts: List[str] = []
+        for item in items:
+            quantity_raw = getattr(item, "quantity", 0)
+            try:
+                quantity = int(quantity_raw)
+            except (TypeError, ValueError):
+                quantity = 0
+
+            name = (getattr(item, "product_name", "") or "").strip()
+            if not name:
+                name = (getattr(item, "product_sku", "") or "").strip()
+
+            if not name and quantity <= 0:
+                continue
+
+            label = name if name else "Item"
+            if quantity > 0:
+                parts.append(f"{quantity} x {label}")
+            else:
+                parts.append(label)
+
+        summary = ", ".join(parts)
+        if len(summary) > 120:
+            summary = summary[:117] + "..."
+        return summary
 
     def _load_order_into_form(self, order: Order) -> None:
         self._editing_order_id = getattr(order, "id", None)
@@ -1110,29 +1425,25 @@ class MainWindow(QMainWindow):
         else:
             self._status_input.setCurrentText(order.status)
 
+        self._set_paid_checkbox(order.is_paid)
+
         self._carrier_input.setText(order.carrier)
         self._tracking_input.setText(order.tracking_number)
+        if hasattr(self, "_order_notes_input"):
+            self._order_notes_input.setPlainText(order.notes or "")
 
-        self._pending_items = [replace(item) for item in order.items]
+        self._pending_items = [replace(item, cost_components=self._copy_components(item.cost_components)) for item in order.items]
         self._pending_items_model.update_rows(self._pending_items)
         if hasattr(self, "_pending_items_table"):
             self._pending_items_table.clearSelection()
 
-        if hasattr(self, "_line_price_type"):
-            self._line_price_type.blockSignals(True)
-            self._line_price_type.setCurrentIndex(0)
-            self._line_price_type.blockSignals(False)
-
-        self._product_combo.setCurrentIndex(-1)
-        self._product_combo.setCurrentText("")
-        self._product_description_input.clear()
-        self._quantity_input.setValue(1)
-        self._unit_price_input.blockSignals(True)
-        self._unit_price_input.setValue(0.00)
-        self._unit_price_input.blockSignals(False)
+        self._set_item_editing_mode(None)
+        self._clear_line_item_inputs()
+        self._update_item_action_buttons()
 
         self._order_status_label.setStyleSheet("color: #1976d2;")
         self._order_status_label.setText("Editing existing order. Save to apply changes.")
+        self._update_cost_summary()
 
     def _run_report(self) -> None:
         start_date = self._extract_optional_date(self._report_start_date)
@@ -1148,8 +1459,25 @@ class MainWindow(QMainWindow):
 
         order_count = len(self._current_report_rows)
         total_sales = sum(getattr(row, "total_amount", 0.0) for row in self._current_report_rows)
+        total_cost = sum(getattr(row, "total_cost", 0.0) for row in self._current_report_rows)
+        total_profit = sum(getattr(row, "profit", 0.0) for row in self._current_report_rows)
+        freebie_total = sum(getattr(row, "freebie_cost", 0.0) for row in self._current_report_rows)
+        tax_total = sum(getattr(row, "tax_amount", 0.0) for row in self._current_report_rows)
+        net_sales = total_sales - freebie_total
+        if net_sales > 0:
+            overall_margin = total_profit / net_sales
+        elif total_sales > 0:
+            overall_margin = total_profit / total_sales
+        else:
+            overall_margin = 0.0
         total_items = sum(getattr(row, "item_count", 0) for row in self._current_report_rows)
-        summary_text = f"Orders: {order_count} | Items: {total_items} | Sales: ${total_sales:,.2f}"
+        displayed_sales = total_sales + (tax_total if getattr(self._app_settings, "tax_add_to_total", False) else 0.0)
+        summary_text = (
+            f"Orders: {order_count} | Items: {total_items} | Sales: ${total_sales:,.2f} | "
+            f"Tax: ${tax_total:,.2f} | Displayed Sales: ${displayed_sales:,.2f} | "
+            f"Freebie Cost: ${freebie_total:,.2f} | Net Revenue: ${net_sales:,.2f} | "
+            f"Cost: ${total_cost:,.2f} | Profit: ${total_profit:,.2f} | Margin: {overall_margin * 100:,.1f}%"
+        )
         if hasattr(self, "_report_summary_label"):
             self._report_summary_label.setText(summary_text)
 
@@ -1256,6 +1584,29 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_map_view"):
             return
 
+        show_lines = True
+        line_style = "curved"
+        line_color = "#3f51b5"
+        line_pattern = "solid"
+        base_layer = "light"
+        shade_states = False
+        territories: List[Dict[str, Any]] = []
+
+        if hasattr(self, "_map_lines_checkbox"):
+            show_lines = self._map_lines_checkbox.isChecked()
+        if hasattr(self, "_map_line_style") and self._map_line_style.currentData() is not None:
+            line_style = str(self._map_line_style.currentData())
+        if hasattr(self, "_map_line_color") and self._map_line_color.currentData() is not None:
+            line_color = str(self._map_line_color.currentData())
+        if hasattr(self, "_map_line_pattern") and self._map_line_pattern.currentData() is not None:
+            line_pattern = str(self._map_line_pattern.currentData())
+        if hasattr(self, "_map_base_layer_combo") and self._map_base_layer_combo.currentData() is not None:
+            layer_candidate = str(self._map_base_layer_combo.currentData())
+            if layer_candidate in {"light", "dark"}:
+                base_layer = layer_candidate
+        if hasattr(self, "_map_territory_checkbox"):
+            shade_states = self._map_territory_checkbox.isChecked()
+
         try:
             destinations = order_service.list_order_destinations()
         except Exception as exc:  # noqa: BLE001
@@ -1283,6 +1634,19 @@ class MainWindow(QMainWindow):
             home_error = "Provide both city and state to plot your home base."
 
         markers: List[Dict[str, Any]] = []
+
+        if shade_states:
+            territory_totals: Dict[str, int] = {}
+            for destination in destinations:
+                state_code = (destination.state or "").strip().upper()
+                if state_code not in STATE_CODE_TO_NAME:
+                    continue
+                territory_totals[state_code] = territory_totals.get(state_code, 0) + int(destination.count)
+            territories = [
+                {"code": code, "name": STATE_CODE_TO_NAME.get(code, code), "count": count}
+                for code, count in sorted(territory_totals.items(), key=lambda item: item[1], reverse=True)
+            ]
+
         for destination in destinations[:75]:
             coordinates = self._geocode_destination(destination.city, destination.state)
             if coordinates is None:
@@ -1327,11 +1691,28 @@ class MainWindow(QMainWindow):
             status_parts.append("Set your home city and state in Settings to add a home base.")
         if home_error:
             status_parts.append(home_error)
+        if shade_states:
+            if territories:
+                status_parts.append(f"States shaded: {len(territories)}.")
+            else:
+                status_parts.append("Shade option on, but no US state data yet.")
 
         status_style = "color: #ef6c00;" if home_error else ""
         self._map_status_label.setStyleSheet(status_style)
         self._map_status_label.setText(" ".join(status_parts))
-        self._map_view.setHtml(self._build_map_html(markers, home_location))
+        self._map_view.setHtml(
+            self._build_map_html(
+                markers,
+                home_location,
+                show_lines=show_lines,
+                line_style=line_style,
+                line_color=line_color,
+                line_pattern=line_pattern,
+                base_layer=base_layer,
+                shade_states=shade_states,
+                territories=territories,
+            )
+        )
 
     def _geocode_location(self, cache_key: str, query: str) -> Optional[Tuple[float, float]]:
         normalized_key = cache_key.strip().lower()
@@ -1378,27 +1759,69 @@ class MainWindow(QMainWindow):
         return self._geocode_location(cache_key, query)
 
     @staticmethod
-    def _build_map_html(markers: List[Dict[str, Any]], home_location: Optional[Dict[str, Any]]) -> str:
+    def _build_map_html(
+        markers: List[Dict[str, Any]],
+        home_location: Optional[Dict[str, Any]],
+        *,
+        show_lines: bool = True,
+        line_style: str = "curved",
+        line_color: str = "#3f51b5",
+        line_pattern: str = "solid",
+        base_layer: str = "light",
+        shade_states: bool = False,
+        territories: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        valid_styles = {"curved", "straight"}
+        valid_patterns = {"solid", "dashed"}
+        valid_layers = {"light", "dark"}
+        style_value = line_style if line_style in valid_styles else "curved"
+        pattern_value = line_pattern if line_pattern in valid_patterns else "solid"
+        color_value = line_color.strip() if isinstance(line_color, str) and line_color.strip() else "#3f51b5"
+        layer_value = base_layer if base_layer in valid_layers else "light"
+        territory_payload = territories or []
+        shade_payload = bool(shade_states) and bool(territory_payload)
+
+        config_payload = {
+            "showLines": bool(show_lines),
+            "lineStyle": style_value,
+            "lineColor": color_value,
+            "linePattern": pattern_value,
+            "baseLayer": layer_value,
+            "shadeTerritories": shade_payload,
+            "territories": territory_payload,
+        }
+
         markers_json = json.dumps(markers)
         home_json = json.dumps(home_location) if home_location else "null"
+        config_json = json.dumps(config_payload)
+        geojson_url = json.dumps(US_STATES_GEOJSON_URL)
 
         return (
             "<!DOCTYPE html>\n"
             "<html><head><meta charset=\"utf-8\"/>"
             "<title>Order Destinations</title>"
             "<link rel=\"stylesheet\" href=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css\"/>"
-            "<style>html, body, #map { height: 100%; margin: 0; }"
-            " .connector { stroke-dasharray: 4 6; }</style>"
+            "<style>html, body, #map { height: 100%; margin: 0; }</style>"
             "</head><body><div id=\"map\"></div>"
             "<script src=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js\"></script>"
             "<script>"
             f"const markers = {markers_json};"
             f"const homeLocation = {home_json};"
+            f"const config = {config_json};"
+            f"const geojsonSource = {geojson_url};"
             "const map = L.map('map');"
-            "L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {"
-            "    maxZoom: 18,"
-            "    attribution: '&copy; OpenStreetMap contributors'"
-            "}).addTo(map);"
+            "const tileSources = {"
+            "    light: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {"
+            "        maxZoom: 18,"
+            "        attribution: '&copy; OpenStreetMap contributors'"
+            "    }),"
+            "    dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {"
+            "        maxZoom: 18,"
+            "        attribution: '&copy; OpenStreetMap contributors &copy; CARTO'"
+            "    })"
+            "};"
+            "const selectedLayer = tileSources[config.baseLayer] || tileSources.light;"
+            "selectedLayer.addTo(map);"
             "const bounds = [];"
             "markers.forEach((item) => {"
             "    const details = [];"
@@ -1446,13 +1869,76 @@ class MainWindow(QMainWindow):
             "    }"
             "    return points;"
             "}"
-            "if (homeLocation && markers.length) {"
+            "if (config.showLines && homeLocation && markers.length) {"
             "    const origin = [homeLocation.lat, homeLocation.lon];"
             "    markers.forEach((item, index) => {"
-            "        const arcPoints = buildArcPoints(origin, [item.lat, item.lon], index);"
-            "        L.polyline(arcPoints, { color: '#3f51b5', weight: 2, opacity: 0.6 }).addTo(map);"
+            "        let segments;"
+            "        if (config.lineStyle === 'straight') {"
+            "            segments = [origin, [item.lat, item.lon]];"
+            "        } else {"
+            "            segments = buildArcPoints(origin, [item.lat, item.lon], index);"
+            "        }"
+            "        const options = { color: config.lineColor || '#3f51b5', weight: 2, opacity: 0.7 };"
+            "        if (config.linePattern === 'dashed') {"
+            "            options.dashArray = '8 6';"
+            "        }"
+            "        L.polyline(segments, options).addTo(map);"
             "    });"
             "}"
+            "if (config.shadeTerritories && config.territories && config.territories.length) {"
+            "    const territoryData = config.territories;"
+            "    const territoryLookup = new Map();"
+            "    let maxCount = 0;"
+            "    territoryData.forEach((item) => {"
+            "        if (!item) { return; }"
+            "        const code = (item.code || '').toString().toUpperCase();"
+            "        const name = (item.name || '').toString().toUpperCase();"
+            "        const count = Number(item.count) || 0;"
+            "        if (code) { territoryLookup.set(code, { name: item.name, count }); }"
+            "        if (name) { territoryLookup.set(name, { name: item.name, count }); }"
+            "        if (count > maxCount) { maxCount = count; }"
+            "    });"
+            "    function getFillColor(value) {"
+            "        if (!maxCount || !value) { return '#f5f5f5'; }"
+            "        const ratio = value / maxCount;"
+            "        if (ratio > 0.85) { return '#1b5e20'; }"
+            "        if (ratio > 0.65) { return '#2e7d32'; }"
+            "        if (ratio > 0.45) { return '#388e3c'; }"
+            "        if (ratio > 0.25) { return '#66bb6a'; }"
+            "        return '#a5d6a7';"
+            "    }"
+            "    fetch(geojsonSource)"
+            "        .then((response) => response.json())"
+            "        .then((geojson) => {"
+            "            L.geoJSON(geojson, {"
+            "                style: (feature) => {"
+            "                    const props = feature && feature.properties ? feature.properties : {};"
+            "                    const code = (props.STATE || props.STATE_ABBR || props.state || '').toString().toUpperCase();"
+            "                    const name = (props.NAME || props.name || '').toString().toUpperCase();"
+                "                    const info = territoryLookup.get(code) || territoryLookup.get(name);"
+                "                    const count = info && info.count ? info.count : 0;"
+                "                    return {"
+                "                        color: '#616161',"
+                "                        weight: 1,"
+                "                        fillOpacity: count ? 0.7 : 0.1,"
+                "                        fillColor: getFillColor(count)"
+                "                    };"
+                "                },"
+                "                onEachFeature: (feature, layer) => {"
+                "                    const props = feature && feature.properties ? feature.properties : {};"
+                "                    const code = (props.STATE || props.STATE_ABBR || props.state || '').toString().toUpperCase();"
+                "                    const nameValue = props.NAME || props.name || 'Unknown';"
+                "                    const lookupKey = code || nameValue.toString().toUpperCase();"
+                "                    const info = territoryLookup.get(lookupKey);"
+                "                    const displayName = info && info.name ? info.name : nameValue;"
+                "                    const count = info && info.count ? info.count : 0;"
+                "                    const tooltip = `${displayName}<br/>Orders: ${count}`;"
+                "                    layer.bindTooltip(tooltip, { sticky: true });"
+                "                }"
+                "            }).addTo(map);"
+                "        })"
+                "        .catch(() => {});"
+                "}"
             "if (bounds.length === 1) {"
             "    map.setView(bounds[0], 8);"
             "} else if (bounds.length > 1) {"
@@ -1478,9 +1964,12 @@ class MainWindow(QMainWindow):
 
     # Orders actions
     def _handle_add_item(self) -> None:
+        editing_index = self._editing_line_index
         product = self._resolve_selected_product()
         if product is None:
             return
+
+        was_edit = editing_index is not None and 0 <= editing_index < len(self._pending_items)
 
         description = self._product_description_input.text().strip()
         quantity = self._quantity_input.value()
@@ -1505,6 +1994,9 @@ class MainWindow(QMainWindow):
             if not description:
                 description = "FREEBIE"
 
+        base_cost = self._base_cost_input.value()
+        components = self._copy_components(self._current_cost_components)
+
         item = OrderItem(
             product_name=product.name,
             product_description=description,
@@ -1512,10 +2004,51 @@ class MainWindow(QMainWindow):
             unit_price=unit_price,
             product_sku=product.sku,
             product_id=product.id,
+            base_unit_cost=base_cost,
+            cost_components=components,
+            is_freebie=is_freebie,
         )
-        self._pending_items.append(item)
-        self._pending_items_model.update_rows(self._pending_items)
+        if was_edit:
+            edit_row = cast(int, editing_index)
+            self._pending_items[edit_row] = item
+            self._pending_items_model.update_rows(self._pending_items)
+            target_row = edit_row
+        else:
+            self._pending_items.append(item)
+            self._pending_items_model.update_rows(self._pending_items)
+            target_row = len(self._pending_items) - 1
+
+        self._set_item_editing_mode(None)
         self._clear_line_item_inputs()
+        if hasattr(self, "_pending_items_table") and 0 <= target_row < len(self._pending_items):
+            self._pending_items_table.selectRow(target_row)
+            model_index = self._pending_items_model.index(target_row, 0)
+            self._pending_items_table.scrollTo(model_index)
+        self._update_item_action_buttons()
+        self._set_order_status("Line item updated." if was_edit else "Item added to order.")
+
+    def _on_product_combo_index_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        data = self._product_combo.itemData(index)
+        if not isinstance(data, Product):
+            return
+
+        if hasattr(self, "_base_cost_input"):
+            self._base_cost_input.blockSignals(True)
+            self._base_cost_input.setValue(data.base_unit_cost)
+            self._base_cost_input.blockSignals(False)
+
+        if hasattr(self, "_unit_price_input") and data.default_unit_price > 0:
+            self._unit_price_input.blockSignals(True)
+            self._unit_price_input.setValue(data.default_unit_price)
+            self._unit_price_input.blockSignals(False)
+
+        self._current_cost_components = self._copy_components(data.pricing_components)
+        self._update_cost_summary()
+
+        if data.description and not self._product_description_input.text().strip():
+            self._product_description_input.setText(data.description)
 
     def _resolve_selected_product(self) -> Optional[Product]:
         index = self._product_combo.currentIndex()
@@ -1549,8 +2082,25 @@ class MainWindow(QMainWindow):
         index = self._pending_items_table.currentIndex()
         if not index.isValid():
             return
-        del self._pending_items[index.row()]
+        row = index.row()
+
+        if self._editing_line_index is not None:
+            if self._editing_line_index == row:
+                self._set_item_editing_mode(None)
+                self._clear_line_item_inputs()
+            elif self._editing_line_index > row:
+                self._editing_line_index -= 1
+
+        del self._pending_items[row]
         self._pending_items_model.update_rows(self._pending_items)
+        total_rows = len(self._pending_items)
+        if total_rows and hasattr(self, "_pending_items_table"):
+            next_row = min(row, total_rows - 1)
+            self._pending_items_table.selectRow(next_row)
+            model_index = self._pending_items_model.index(next_row, 0)
+            self._pending_items_table.scrollTo(model_index)
+        self._update_item_action_buttons()
+        self._set_order_status("Line item removed.")
 
     def _on_unit_price_changed(self, value: float) -> None:
         if not hasattr(self, "_line_price_type"):
@@ -1560,11 +2110,13 @@ class MainWindow(QMainWindow):
         target_text = "FREEBIE" if is_zero else "Standard"
 
         if self._line_price_type.currentText().lower() == target_text.lower():
+            self._refresh_margin_preview()
             return
 
         self._line_price_type.blockSignals(True)
         self._line_price_type.setCurrentText(target_text)
         self._line_price_type.blockSignals(False)
+        self._refresh_margin_preview()
 
     def _on_price_type_changed(self, text: str) -> None:
         normalized = text.strip().upper()
@@ -1577,6 +2129,150 @@ class MainWindow(QMainWindow):
             if abs(self._unit_price_input.value()) < 0.005:
                 # leave the value at zero but nudge focus so user can enter price
                 self._unit_price_input.selectAll()
+        self._refresh_margin_preview()
+
+    def _open_cost_component_editor(self) -> None:
+        dialog = CostComponentEditorDialog(components=self._current_cost_components, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self._current_cost_components = dialog.components()
+        self._update_cost_summary()
+
+    def _update_cost_summary(self) -> None:
+        if not hasattr(self, "_cost_summary_label"):
+            return
+
+        extras_total = sum(component.amount for component in self._current_cost_components)
+        extras_count = len(self._current_cost_components)
+        self._cost_summary_label.setText(f"Extras: {extras_count} | ${extras_total:,.2f}")
+        self._refresh_margin_preview()
+
+    def _refresh_margin_preview(self) -> None:
+        if not hasattr(self, "_margin_preview_label"):
+            return
+
+        base_cost = self._base_cost_input.value() if hasattr(self, "_base_cost_input") else 0.0
+        extras_total = sum(component.amount for component in self._current_cost_components)
+        unit_cost = base_cost + extras_total
+        unit_price = self._unit_price_input.value() if hasattr(self, "_unit_price_input") else 0.0
+        unit_profit = unit_price - unit_cost
+        quantity = self._quantity_input.value() if hasattr(self, "_quantity_input") else 0
+        line_profit = unit_profit * max(1, quantity)
+
+        if unit_price > 0:
+            margin_pct = (unit_profit / unit_price) * 100
+            margin_text = f"{margin_pct:.1f}%"
+        else:
+            margin_text = "--"
+
+        self._margin_preview_label.setText(
+            f"Unit Cost: ${unit_cost:,.2f} | Profit/unit: ${unit_profit:,.2f} | "
+            f"Line Profit: ${line_profit:,.2f} | Margin: {margin_text}"
+        )
+
+    @staticmethod
+    def _copy_components(components: Iterable[CostComponent]) -> List[CostComponent]:
+        if components is None:
+            return []
+        return [CostComponent(label=component.label, amount=component.amount) for component in components]
+
+    def _set_item_editing_mode(self, index: Optional[int]) -> None:
+        valid_index: Optional[int] = None
+        if index is not None and 0 <= index < len(self._pending_items):
+            valid_index = index
+
+        self._editing_line_index = valid_index
+
+        if hasattr(self, "_add_item_button"):
+            self._add_item_button.setText("Apply Changes" if valid_index is not None else "Add Item")
+
+        if hasattr(self, "_cancel_edit_item_button"):
+            self._cancel_edit_item_button.setVisible(valid_index is not None)
+            self._cancel_edit_item_button.setEnabled(valid_index is not None)
+
+        self._update_item_action_buttons()
+
+    def _update_item_action_buttons(self) -> None:
+        has_selection = False
+        if hasattr(self, "_pending_items_table"):
+            selection_model = self._pending_items_table.selectionModel()
+            if selection_model is not None:
+                has_selection = bool(selection_model.selectedRows())
+
+        if hasattr(self, "_edit_item_button"):
+            self._edit_item_button.setEnabled(has_selection)
+        if hasattr(self, "_remove_item_button"):
+            self._remove_item_button.setEnabled(has_selection)
+
+    def _on_pending_items_selection_changed(self, *_args) -> None:
+        self._update_item_action_buttons()
+
+    def _handle_edit_item(self) -> None:
+        if not self._pending_items:
+            return
+        if not hasattr(self, "_pending_items_table"):
+            return
+        selection_model = self._pending_items_table.selectionModel()
+        if selection_model is None:
+            return
+        indexes = selection_model.selectedRows()
+        if not indexes:
+            self._set_order_status("Select an item before editing.", error=True)
+            return
+        row = indexes[0].row()
+        if not (0 <= row < len(self._pending_items)):
+            return
+        self._populate_item_editor(row, self._pending_items[row])
+        self._set_order_status("Editing selected line item. Apply changes or cancel.")
+
+    def _populate_item_editor(self, index: int, item: OrderItem) -> None:
+        self._set_item_editing_mode(index)
+        if hasattr(self, "_pending_items_table"):
+            self._pending_items_table.selectRow(index)
+            model_index = self._pending_items_model.index(index, 0)
+            self._pending_items_table.scrollTo(model_index)
+        if hasattr(self, "_product_combo"):
+            blocker = QSignalBlocker(self._product_combo)
+            products = list(getattr(self, "_products_cache", []))
+            product_index = next(
+                (i for i, product in enumerate(products) if getattr(product, "sku", None) == getattr(item, "product_sku", None)),
+                -1,
+            )
+            if product_index >= 0:
+                self._product_combo.setCurrentIndex(product_index)
+            else:
+                label = (getattr(item, "product_name", None) or getattr(item, "product_sku", None) or "").strip()
+                self._product_combo.setCurrentIndex(-1)
+                self._product_combo.setCurrentText(label)
+            del blocker
+
+        if hasattr(self, "_product_description_input"):
+            self._product_description_input.setText(getattr(item, "product_description", ""))
+        if hasattr(self, "_quantity_input"):
+            self._quantity_input.setValue(int(getattr(item, "quantity", 0) or 0))
+        if hasattr(self, "_base_cost_input"):
+            blocker = QSignalBlocker(self._base_cost_input)
+            self._base_cost_input.setValue(float(getattr(item, "base_unit_cost", 0.0) or 0.0))
+            del blocker
+        if hasattr(self, "_unit_price_input"):
+            blocker = QSignalBlocker(self._unit_price_input)
+            self._unit_price_input.setValue(float(getattr(item, "unit_price", 0.0) or 0.0))
+            del blocker
+        if hasattr(self, "_line_price_type"):
+            blocker = QSignalBlocker(self._line_price_type)
+            self._line_price_type.setCurrentText("FREEBIE" if getattr(item, "is_freebie", False) else "Standard")
+            del blocker
+
+        self._current_cost_components = self._copy_components(item.cost_components)
+        self._update_cost_summary()
+
+    def _handle_cancel_item_edit(self) -> None:
+        if self._editing_line_index is None:
+            return
+        self._set_item_editing_mode(None)
+        self._clear_line_item_inputs()
+        self._set_order_status("Line item edit cancelled.")
 
     def _handle_save_order(self) -> None:
         customer_name = self._customer_name_input.text().strip()
@@ -1594,6 +2290,7 @@ class MainWindow(QMainWindow):
         status = self._status_input.currentText()
         carrier = self._carrier_input.text().strip()
         tracking_number = self._tracking_input.text().strip()
+        notes = self._order_notes_input.toPlainText().strip() if hasattr(self, "_order_notes_input") else ""
         order_date = self._extract_optional_date(self._order_date_input) or date.today()
         ship_date = self._extract_optional_date(self._ship_date_input)
         target_completion = self._extract_optional_date(self._target_completion_input)
@@ -1603,6 +2300,7 @@ class MainWindow(QMainWindow):
             return
 
         editing_order_id = self._editing_order_id
+        saved_order_id: Optional[int] = None
 
         try:
             order = order_service.build_order(
@@ -1616,13 +2314,16 @@ class MainWindow(QMainWindow):
                 ship_date=ship_date,
                 target_completion_date=target_completion,
                 items=list(self._pending_items),
+                is_paid=self._paid_checkbox.isChecked() if hasattr(self, "_paid_checkbox") else False,
+                notes=notes,
             )
 
             if editing_order_id is None:
-                order_service.save_order(order)
+                saved_order_id = int(order_service.save_order(order))
                 success_message = "Order saved successfully."
             else:
-                order_service.update_order(editing_order_id, order)
+                updated_order = order_service.update_order(editing_order_id, order)
+                saved_order_id = int(getattr(updated_order, "id", editing_order_id))
                 success_message = "Order updated successfully."
         except ValueError as exc:
             self._set_order_status(str(exc), error=True)
@@ -1631,11 +2332,19 @@ class MainWindow(QMainWindow):
             self._set_order_status(f"Failed to save order: {exc}", error=True)
             return
 
-        self._load_recent_orders()
+        if saved_order_id is None and editing_order_id is not None:
+            saved_order_id = int(editing_order_id)
+
+        if saved_order_id is not None:
+            self._load_recent_orders(select_order_id=saved_order_id)
+        else:
+            self._load_recent_orders()
         self.refresh_dashboard()
         self._run_report()
         self._refresh_products()
         self._set_order_status(success_message)
+        self._start_new_order(clear_status=False)
+        self._update_order_action_buttons()
 
     def _clear_line_item_inputs(self) -> None:
         self._product_combo.setCurrentIndex(-1)
@@ -1645,11 +2354,17 @@ class MainWindow(QMainWindow):
         self._unit_price_input.blockSignals(True)
         self._unit_price_input.setValue(0.00)
         self._unit_price_input.blockSignals(False)
+        if hasattr(self, "_base_cost_input"):
+            self._base_cost_input.blockSignals(True)
+            self._base_cost_input.setValue(0.00)
+            self._base_cost_input.blockSignals(False)
+        self._current_cost_components = []
         if hasattr(self, "_line_price_type"):
             self._line_price_type.blockSignals(True)
             self._line_price_type.setCurrentIndex(0)
             self._line_price_type.blockSignals(False)
         self._product_combo.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._update_cost_summary()
 
     def _clear_order_form(self) -> None:
         self._order_number_input.setText(order_service.preview_next_order_number())
@@ -1660,11 +2375,14 @@ class MainWindow(QMainWindow):
         self._ship_date_input.setDate(QDate.currentDate())
         self._ship_date_input.blockSignals(False)
         self._status_input.setCurrentIndex(0)
+        self._set_paid_checkbox(False)
         self._carrier_input.clear()
         self._tracking_input.clear()
         self._target_completion_input.blockSignals(True)
         self._target_completion_input.setDate(QDate.currentDate())
         self._target_completion_input.blockSignals(False)
+        if hasattr(self, "_order_notes_input"):
+            self._order_notes_input.clear()
 
     def _set_order_status(self, message: str, *, error: bool = False) -> None:
         palette = "color: #d32f2f;" if error else "color: #2e7d32;"
@@ -1675,6 +2393,11 @@ class MainWindow(QMainWindow):
         row = current.row()
         if 0 <= row < len(self._recent_orders_cache):
             order = self._recent_orders_cache[row]
+            order_id_value = getattr(order, "id", None)
+            if order_id_value is not None:
+                persisted = order_service.fetch_order(int(order_id_value))
+                if persisted is not None:
+                    order = persisted
             self._selected_order = order
             self._load_order_into_form(order)
         else:
@@ -1688,6 +2411,26 @@ class MainWindow(QMainWindow):
             self._cancel_order_button.setEnabled(has_order)
         if hasattr(self, "_delete_order_button"):
             self._delete_order_button.setEnabled(has_order)
+        if hasattr(self, "_export_invoice_button"):
+            self._export_invoice_button.setEnabled(has_order)
+
+    def _on_status_changed(self, status: str) -> None:
+        if self._selected_order is not None:
+            self._selected_order = replace(self._selected_order, status=status)
+
+    def _on_paid_checkbox_changed(self, state: int) -> None:
+        check_state = Qt.CheckState(state) if not isinstance(state, Qt.CheckState) else state
+        should_be_paid = check_state == Qt.CheckState.Checked
+
+        if self._selected_order is not None:
+            self._selected_order = replace(self._selected_order, is_paid=should_be_paid)
+
+    def _set_paid_checkbox(self, checked: bool) -> None:
+        if not hasattr(self, "_paid_checkbox"):
+            return
+        blocker = QSignalBlocker(self._paid_checkbox)
+        self._paid_checkbox.setChecked(bool(checked))
+        del blocker
 
     def _handle_cancel_order(self) -> None:
         if self._selected_order is None or getattr(self._selected_order, "id", None) is None:
@@ -1765,6 +2508,46 @@ class MainWindow(QMainWindow):
         self._load_recent_orders()
         self._run_report()
 
+    def _handle_export_invoice(self) -> None:
+        if self._selected_order is None or getattr(self._selected_order, "id", None) is None:
+            self._show_message("Select a saved order before exporting an invoice.")
+            return
+
+        dialog = InvoiceManagerDialog(parent=self, app_settings=self._app_settings, order=self._selected_order)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._set_order_status("Invoice export cancelled.")
+            return
+
+        updated_settings = dialog.get_updated_settings()
+        if updated_settings is not None:
+            self._app_settings = updated_settings
+
+        order_id_value = getattr(self._selected_order, "id", None)
+        if order_id_value is None:
+            self._set_order_status("Select a saved order before exporting an invoice.", error=True)
+            return
+        order_id = int(order_id_value)
+        default_name = f"{self._selected_order.order_number}_invoice.pdf".replace(" ", "_")
+        suggested_path = str(Path.home() / default_name)
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Invoice",
+            suggested_path,
+            "PDF Files (*.pdf);;All Files (*)",
+        )
+
+        if not filename:
+            self._set_order_status("Invoice export cancelled.")
+            return
+
+        try:
+            exported_path = order_service.export_order_invoice(order_id, filename)
+        except Exception as exc:  # noqa: BLE001
+            self._set_order_status(f"Invoice export failed: {exc}", error=True)
+            return
+
+        self._set_order_status(f"Invoice saved to {exported_path}")
+
     def _on_report_range_changed(self, index: int) -> None:
         if not hasattr(self, "_report_range_input"):
             return
@@ -1827,6 +2610,15 @@ class MainWindow(QMainWindow):
         self._logo_path_input.clear()
         self._settings_status_label.setText("Logo path cleared (save to apply).")
 
+    def _open_invoice_manager(self) -> None:
+        dialog = InvoiceManagerDialog(parent=self, app_settings=self._app_settings)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            updated = dialog.get_updated_settings()
+            if updated is not None:
+                self._app_settings = updated
+                self._settings_status_label.setText("Invoice settings saved.")
+                self.refresh_dashboard()
+
     def _normalize_home_state_input(self) -> None:
         if not hasattr(self, "_home_state_input"):
             return
@@ -1855,6 +2647,23 @@ class MainWindow(QMainWindow):
             dashboard_logo_size=self._logo_size_input.value(),
             dashboard_home_city=self._home_city_input.text().strip(),
             dashboard_home_state=self._home_state_input.text().strip().upper()[:2],
+            invoice_slogan=self._app_settings.invoice_slogan,
+            invoice_street=self._app_settings.invoice_street,
+            invoice_city=self._app_settings.invoice_city,
+            invoice_state=self._app_settings.invoice_state,
+            invoice_zip=self._app_settings.invoice_zip,
+            invoice_phone=self._app_settings.invoice_phone,
+            invoice_fax=self._app_settings.invoice_fax,
+            invoice_terms=self._app_settings.invoice_terms,
+            invoice_comments=self._app_settings.invoice_comments,
+            invoice_contact_name=self._app_settings.invoice_contact_name,
+            invoice_contact_phone=self._app_settings.invoice_contact_phone,
+            invoice_contact_email=self._app_settings.invoice_contact_email,
+            payment_options=list(self._app_settings.payment_options),
+            payment_other=self._app_settings.payment_other,
+            tax_rate_percent=self._tax_rate_input.value(),
+            tax_show_on_invoice=self._tax_show_invoice_checkbox.isChecked(),
+            tax_add_to_total=self._tax_include_total_checkbox.isChecked(),
         )
         self._app_settings = order_service.update_app_settings(updated)
         self._order_number_format_input.setText(self._app_settings.order_number_format)
@@ -1867,6 +2676,9 @@ class MainWindow(QMainWindow):
         if align_index >= 0:
             self._logo_alignment_combo.setCurrentIndex(align_index)
         self._logo_size_input.setValue(self._app_settings.dashboard_logo_size)
+        self._tax_rate_input.setValue(self._app_settings.tax_rate_percent)
+        self._tax_show_invoice_checkbox.setChecked(self._app_settings.tax_show_on_invoice)
+        self._tax_include_total_checkbox.setChecked(self._app_settings.tax_add_to_total)
         self._order_number_input.setText(order_service.preview_next_order_number())
         if self._product_manager_dialog is not None:
             self._product_manager_dialog.update_app_settings(self._app_settings)
@@ -1922,6 +2734,50 @@ class MainWindow(QMainWindow):
         title_label = QLabel("Shipping Destinations")
         title_label.setStyleSheet("font-size: 18px; font-weight: bold;")
         header_layout.addWidget(title_label)
+
+        self._map_lines_checkbox = QCheckBox("Show Connections")
+        self._map_lines_checkbox.setChecked(True)
+        self._map_lines_checkbox.toggled.connect(self._refresh_map)
+        header_layout.addWidget(self._map_lines_checkbox)
+
+        self._map_line_style = QComboBox()
+        self._map_line_style.addItem("Curved Arcs", "curved")
+        self._map_line_style.addItem("Straight Lines", "straight")
+        self._map_line_style.setToolTip(
+            "Choose whether to draw curved arcs or straight lines between home and destinations.",
+        )
+        self._map_line_style.currentIndexChanged.connect(lambda _index: self._refresh_map())
+        header_layout.addWidget(self._map_line_style)
+
+        self._map_line_pattern = QComboBox()
+        self._map_line_pattern.addItem("Solid", "solid")
+        self._map_line_pattern.addItem("Dashed", "dashed")
+        self._map_line_pattern.setToolTip("Pick a stroke pattern for connection lines.")
+        self._map_line_pattern.currentIndexChanged.connect(lambda _index: self._refresh_map())
+        header_layout.addWidget(self._map_line_pattern)
+
+        self._map_line_color = QComboBox()
+        self._map_line_color.addItem("Deep Blue", "#3f51b5")
+        self._map_line_color.addItem("Crimson", "#c62828")
+        self._map_line_color.addItem("Teal", "#00897b")
+        self._map_line_color.addItem("Amber", "#ff8f00")
+        self._map_line_color.addItem("Purple", "#6a1b9a")
+        self._map_line_color.setToolTip("Select the connection line color.")
+        self._map_line_color.currentIndexChanged.connect(lambda _index: self._refresh_map())
+        header_layout.addWidget(self._map_line_color)
+
+        self._map_base_layer_combo = QComboBox()
+        self._map_base_layer_combo.addItem("Light Basemap", "light")
+        self._map_base_layer_combo.addItem("Dark Basemap", "dark")
+        self._map_base_layer_combo.setToolTip("Switch between light and dark map backgrounds.")
+        self._map_base_layer_combo.currentIndexChanged.connect(lambda _index: self._refresh_map())
+        header_layout.addWidget(self._map_base_layer_combo)
+
+        self._map_territory_checkbox = QCheckBox("Shade States")
+        self._map_territory_checkbox.setToolTip("Color US states by shipment volume.")
+        self._map_territory_checkbox.toggled.connect(self._refresh_map)
+        header_layout.addWidget(self._map_territory_checkbox)
+
         header_layout.addStretch(1)
 
         refresh_button = QPushButton("Refresh Map")
@@ -1939,7 +2795,7 @@ class MainWindow(QMainWindow):
     def _configure_table(self, table: QTableView) -> None:
         header = table.horizontalHeader()
         header.setStretchLastSection(True)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)

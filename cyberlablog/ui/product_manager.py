@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Iterable, List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -18,18 +19,24 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QDoubleSpinBox,
+    QFrame,
+    QScrollArea,
     QSpinBox,
     QTableView,
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QSplitter,
 )
 
-from ..models.order_models import AppSettings, Product
+from ..models.order_models import AppSettings, CostComponent, Product
 from ..services import order_service
 from ..viewmodels.table_models import ListTableModel
+from .cost_component_dialog import CostComponentEditorDialog
 
 ProductsChangedCallback = Callable[[Optional[str]], None]
+_PHOTO_HINT_DEFAULT = "Images are copied into the application data folder when saved."
 
 
 class ProductManagerDialog(QDialog):
@@ -43,7 +50,7 @@ class ProductManagerDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Product Manager")
-        self.resize(1100, 720)
+        self.resize(1100, 820)
 
         self._on_products_changed = on_products_changed
         self._app_settings = app_settings
@@ -52,6 +59,8 @@ class ProductManagerDialog(QDialog):
         self._products: List[Product] = []
         self._selected_product: Optional[Product] = None
         self._selection_connected = False
+        self._product_pricing_components: List[CostComponent] = []
+        self._current_photo_path: Optional[Path] = None
 
         self._forecast_model = ListTableModel(
             (
@@ -76,6 +85,8 @@ class ProductManagerDialog(QDialog):
                 ("SKU", lambda product: getattr(product, "sku", "")),
                 ("Name", lambda product: getattr(product, "name", "")),
                 ("Inventory", lambda product: getattr(product, "inventory_count", "")),
+                ("Unit Cost", lambda product: f"${getattr(product, 'total_unit_cost', 0):,.2f}"),
+                ("Price", lambda product: f"${getattr(product, 'default_unit_price', 0):,.2f}"),
                 ("Status", lambda product: getattr(product, "status", "")),
                 ("Alerts", lambda product: self._product_alert_text(product)),
                 ("Description", lambda product: getattr(product, "description", "")),
@@ -128,17 +139,48 @@ class ProductManagerDialog(QDialog):
         layout.setSpacing(12)
         self.setLayout(layout)
 
-        layout.addWidget(QLabel("Inventory Forecast"))
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        layout.addWidget(scroll_area, stretch=1)
+
+        content_container = QWidget()
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+        content_container.setLayout(content_layout)
+        scroll_area.setWidget(content_container)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
+        content_layout.addWidget(splitter, stretch=1)
+
+        forecast_container = QWidget()
+        forecast_layout = QVBoxLayout()
+        forecast_layout.setContentsMargins(0, 0, 0, 0)
+        forecast_layout.setSpacing(6)
+        forecast_container.setLayout(forecast_layout)
+        forecast_layout.addWidget(QLabel("Inventory Forecast"))
         self._forecast_table = QTableView()
         self._forecast_table.setModel(self._forecast_model)
         self._configure_table(self._forecast_table)
-        layout.addWidget(self._forecast_table, stretch=1)
+        self._forecast_table.setMinimumHeight(220)
+        forecast_layout.addWidget(self._forecast_table)
+        splitter.addWidget(forecast_container)
 
-        layout.addWidget(QLabel("Products"))
+        products_container = QWidget()
+        products_layout = QVBoxLayout()
+        products_layout.setContentsMargins(0, 0, 0, 0)
+        products_layout.setSpacing(6)
+        products_container.setLayout(products_layout)
+        products_layout.addWidget(QLabel("Products"))
         self._products_table = QTableView()
         self._products_table.setModel(self._products_model)
         self._configure_table(self._products_table)
-        layout.addWidget(self._products_table, stretch=2)
+        self._products_table.setMinimumHeight(220)
+        products_layout.addWidget(self._products_table)
+        splitter.addWidget(products_container)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
 
         selection_model = self._products_table.selectionModel()
         if selection_model is not None:
@@ -148,7 +190,7 @@ class ProductManagerDialog(QDialog):
         form_group = QWidget()
         form_layout = QFormLayout()
         form_group.setLayout(form_layout)
-        layout.addWidget(form_group)
+        content_layout.addWidget(form_group)
 
         self._product_sku_input = QLineEdit()
         form_layout.addRow("SKU", self._product_sku_input)
@@ -157,20 +199,75 @@ class ProductManagerDialog(QDialog):
         form_layout.addRow("Name", self._product_name_input)
 
         self._product_description_text = QTextEdit()
-        self._product_description_text.setFixedHeight(80)
+        self._product_description_text.setFixedHeight(48)
         form_layout.addRow("Description", self._product_description_text)
 
-        photo_layout = QHBoxLayout()
+        photo_widget = QWidget()
+        photo_widget_layout = QHBoxLayout()
+        photo_widget_layout.setContentsMargins(0, 0, 0, 0)
+        photo_widget_layout.setSpacing(8)
+        photo_widget.setLayout(photo_widget_layout)
+
+        photo_fields_layout = QVBoxLayout()
+        photo_fields_layout.setContentsMargins(0, 0, 0, 0)
+        photo_fields_layout.setSpacing(6)
+
+        photo_path_row = QHBoxLayout()
+        photo_path_row.setContentsMargins(0, 0, 0, 0)
+        photo_path_row.setSpacing(6)
         self._product_photo_input = QLineEdit()
+        self._product_photo_input.textChanged.connect(self._on_photo_path_changed)
         browse_button = QPushButton("Browse...")
         browse_button.clicked.connect(self._handle_browse_photo)
-        photo_layout.addWidget(self._product_photo_input)
-        photo_layout.addWidget(browse_button)
-        form_layout.addRow("Photo Path", photo_layout)
+        self._open_photo_button = QPushButton("Open Image")
+        self._open_photo_button.clicked.connect(self._handle_open_photo)
+        self._open_photo_button.setEnabled(False)
+        photo_path_row.addWidget(self._product_photo_input)
+        photo_path_row.addWidget(browse_button)
+        photo_path_row.addWidget(self._open_photo_button)
+        photo_fields_layout.addLayout(photo_path_row)
+
+        self._photo_hint_label = QLabel(_PHOTO_HINT_DEFAULT)
+        self._photo_hint_label.setWordWrap(True)
+        photo_fields_layout.addWidget(self._photo_hint_label)
+
+        photo_widget_layout.addLayout(photo_fields_layout)
+
+        self._product_photo_preview = QLabel("No Preview")
+        self._product_photo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._product_photo_preview.setFixedSize(160, 160)
+        self._product_photo_preview.setFrameShape(QFrame.Shape.StyledPanel)
+        self._product_photo_preview.setFrameShadow(QFrame.Shadow.Sunken)
+        photo_widget_layout.addWidget(self._product_photo_preview)
+
+        form_layout.addRow("Photo", photo_widget)
 
         self._product_inventory_input = QSpinBox()
         self._product_inventory_input.setMaximum(1_000_000)
         form_layout.addRow("Inventory", self._product_inventory_input)
+
+        self._product_base_cost_input = QDoubleSpinBox()
+        self._product_base_cost_input.setPrefix("$")
+        self._product_base_cost_input.setDecimals(2)
+        self._product_base_cost_input.setMaximum(1_000_000)
+        self._product_base_cost_input.valueChanged.connect(lambda _value: self._update_pricing_summary())
+        form_layout.addRow("Base Unit Cost", self._product_base_cost_input)
+
+        self._product_price_input = QDoubleSpinBox()
+        self._product_price_input.setPrefix("$")
+        self._product_price_input.setDecimals(2)
+        self._product_price_input.setMaximum(1_000_000)
+        self._product_price_input.valueChanged.connect(lambda _value: self._update_pricing_summary())
+        form_layout.addRow("Default Price", self._product_price_input)
+
+        extras_layout = QHBoxLayout()
+        self._product_cost_summary_label = QLabel()
+        extras_button = QPushButton("Edit Extras…")
+        extras_button.clicked.connect(self._handle_product_pricing_components)
+        extras_layout.addWidget(extras_button)
+        extras_layout.addWidget(self._product_cost_summary_label)
+        extras_layout.addStretch(1)
+        form_layout.addRow("Extras", extras_layout)
 
         self._product_status_combo = QComboBox()
         self._product_status_combo.addItems(self._product_status_options)
@@ -195,6 +292,7 @@ class ProductManagerDialog(QDialog):
         button_layout.addWidget(delete_button)
 
         button_layout.addStretch(1)
+        self._update_pricing_summary()
 
     def _on_product_selection_changed(self, current, _previous) -> None:
         row = current.row()
@@ -210,19 +308,35 @@ class ProductManagerDialog(QDialog):
             self._product_name_input.clear()
             self._product_description_text.clear()
             self._product_photo_input.clear()
+            self._update_photo_preview("")
             self._product_inventory_input.setValue(0)
+            self._product_base_cost_input.blockSignals(True)
+            self._product_base_cost_input.setValue(0.00)
+            self._product_base_cost_input.blockSignals(False)
+            self._product_price_input.blockSignals(True)
+            self._product_price_input.setValue(0.00)
+            self._product_price_input.blockSignals(False)
             self._product_status_combo.blockSignals(True)
             if self._product_status_combo.count() > 0:
                 self._product_status_combo.setCurrentIndex(0)
             self._product_status_combo.blockSignals(False)
+            self._product_pricing_components = []
             self._product_alert_hint.clear()
+            self._update_pricing_summary()
             return
 
         self._product_sku_input.setText(product.sku)
         self._product_name_input.setText(product.name)
         self._product_description_text.setText(product.description)
         self._product_photo_input.setText(product.photo_path)
+        self._update_photo_preview(product.photo_path)
         self._product_inventory_input.setValue(product.inventory_count)
+        self._product_base_cost_input.blockSignals(True)
+        self._product_base_cost_input.setValue(product.base_unit_cost)
+        self._product_base_cost_input.blockSignals(False)
+        self._product_price_input.blockSignals(True)
+        self._product_price_input.setValue(product.default_unit_price)
+        self._product_price_input.blockSignals(False)
         self._product_status_combo.blockSignals(True)
         combo_index = self._product_status_combo.findText(
             product.status,
@@ -233,7 +347,9 @@ class ProductManagerDialog(QDialog):
         elif self._product_status_combo.count() > 0:
             self._product_status_combo.setCurrentIndex(0)
         self._product_status_combo.blockSignals(False)
+        self._product_pricing_components = self._clone_components(product.pricing_components)
         self._product_alert_hint.setText(self._product_alert_text(product))
+        self._update_pricing_summary()
 
     def _handle_product_new(self) -> None:
         dialog = _NewProductDialog(parent=self)
@@ -273,6 +389,9 @@ class ProductManagerDialog(QDialog):
             inventory_count=self._product_inventory_input.value(),
             is_complete=self._is_product_complete(description_text, photo_path),
             status=status,
+            base_unit_cost=self._product_base_cost_input.value(),
+            default_unit_price=self._product_price_input.value(),
+            pricing_components=self._clone_components(self._product_pricing_components),
         )
 
         try:
@@ -310,6 +429,76 @@ class ProductManagerDialog(QDialog):
         self._notify_products_changed(None)
         self._show_message("Product deleted.")
 
+    def _handle_product_pricing_components(self) -> None:
+        dialog = CostComponentEditorDialog(components=self._product_pricing_components, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self._product_pricing_components = dialog.components()
+        self._update_pricing_summary()
+
+    def _update_pricing_summary(self) -> None:
+        if not hasattr(self, "_product_cost_summary_label"):
+            return
+
+        extras_total = sum(component.amount for component in self._product_pricing_components)
+        unit_cost = self._product_base_cost_input.value() + extras_total
+        default_price = self._product_price_input.value()
+        if default_price > 0:
+            margin_pct = ((default_price - unit_cost) / default_price) * 100
+            margin_text = f"{margin_pct:.1f}%"
+        else:
+            margin_text = "--"
+
+        self._product_cost_summary_label.setText(
+            f"Extras {len(self._product_pricing_components)} | ${extras_total:,.2f} | "
+            f"Unit Cost ${unit_cost:,.2f} | Margin {margin_text}"
+        )
+
+    def _on_photo_path_changed(self, value: str) -> None:
+        self._update_photo_preview(value)
+
+    def _update_photo_preview(self, value: str) -> None:
+        if not hasattr(self, "_product_photo_preview"):
+            return
+
+        resolved = order_service.resolve_product_photo(value.strip()) if value else None
+        self._current_photo_path = resolved
+        if resolved and resolved.exists():
+            pixmap = QPixmap(str(resolved))
+            if not pixmap.isNull():
+                scaled = pixmap.scaled(
+                    self._product_photo_preview.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self._product_photo_preview.setPixmap(scaled)
+                self._product_photo_preview.setText("")
+                self._product_photo_preview.setToolTip(str(resolved))
+                if hasattr(self, "_open_photo_button"):
+                    self._open_photo_button.setEnabled(True)
+                if hasattr(self, "_photo_hint_label"):
+                    self._photo_hint_label.setText(f"Currently loaded from:\n{resolved}")
+                return
+
+        self._product_photo_preview.setPixmap(QPixmap())
+        self._product_photo_preview.setText("No Preview")
+        self._product_photo_preview.setToolTip("")
+        if hasattr(self, "_open_photo_button"):
+            self._open_photo_button.setEnabled(False)
+        if hasattr(self, "_photo_hint_label"):
+            self._photo_hint_label.setText(_PHOTO_HINT_DEFAULT)
+        self._current_photo_path = None
+
+    def _handle_open_photo(self) -> None:
+        if not self._current_photo_path:
+            return
+        if not self._current_photo_path.exists():
+            QMessageBox.warning(self, "Product Manager", "Image file is missing on disk.")
+            self._update_photo_preview("")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._current_photo_path)))
+
     def _handle_browse_photo(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
@@ -323,6 +512,12 @@ class ProductManagerDialog(QDialog):
     def _notify_products_changed(self, select_sku: Optional[str]) -> None:
         if self._on_products_changed is not None:
             self._on_products_changed(select_sku)
+
+    @staticmethod
+    def _clone_components(components: Iterable[CostComponent] | None) -> List[CostComponent]:
+        if components is None:
+            return []
+        return [CostComponent(label=component.label, amount=component.amount) for component in components]
 
     def _product_alert_text(self, product: object) -> str:
         if not isinstance(product, Product):

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import math
 from datetime import date, datetime, timedelta
-from typing import List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from ..models.order_models import (
     CompletedOrder,
+    CostComponent,
     CustomerSalesSummary,
     DashboardSnapshot,
     Order,
@@ -37,11 +39,16 @@ def insert_order(order: Order) -> int:
                     order_date,
                     ship_date,
                     status,
+                    is_paid,
                     carrier,
                     tracking_number,
+                    notes,
                     total_amount,
+                    tax_rate,
+                    tax_amount,
+                    tax_included_in_total,
                     target_completion_date
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.order_number.strip(),
@@ -50,9 +57,14 @@ def insert_order(order: Order) -> int:
                     order.order_date.strftime(_DATE_FORMAT),
                     order.ship_date.strftime(_DATE_FORMAT) if order.ship_date else None,
                     order.status.strip(),
+                    int(bool(order.is_paid)),
                     order.carrier.strip(),
                     order.tracking_number.strip(),
+                    order.notes.strip(),
                     order.total_amount,
+                    float(order.tax_rate),
+                    float(order.tax_amount),
+                    int(bool(order.tax_included_in_total)),
                     order.target_completion_date.strftime(_DATE_FORMAT)
                     if order.target_completion_date
                     else None,
@@ -69,8 +81,14 @@ def insert_order(order: Order) -> int:
                     product_name,
                     product_description,
                     quantity,
-                    unit_price
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    unit_price,
+                    base_unit_cost,
+                    cost_components,
+                    is_freebie,
+                    applied_discount,
+                    applied_tax,
+                    price_adjustment_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -81,6 +99,12 @@ def insert_order(order: Order) -> int:
                         item.product_description.strip(),
                         item.quantity,
                         item.unit_price,
+                        float(item.base_unit_cost),
+                        _serialize_components(item.cost_components),
+                        int(bool(getattr(item, "is_freebie", False))),
+                        float(getattr(item, "applied_discount", 0.0) or 0.0),
+                        float(getattr(item, "applied_tax", 0.0) or 0.0),
+                        str(getattr(item, "price_adjustment_note", "") or ""),
                     )
                     for item in order.items
                 ],
@@ -109,9 +133,14 @@ def update_order(order_id: int, order: Order) -> None:
                     order_date = ?,
                     ship_date = ?,
                     status = ?,
+                    is_paid = ?,
                     carrier = ?,
                     tracking_number = ?,
+                    notes = ?,
                     total_amount = ?,
+                    tax_rate = ?,
+                    tax_amount = ?,
+                    tax_included_in_total = ?,
                     target_completion_date = ?
                 WHERE id = ?
                 """,
@@ -122,9 +151,14 @@ def update_order(order_id: int, order: Order) -> None:
                     order.order_date.strftime(_DATE_FORMAT),
                     order.ship_date.strftime(_DATE_FORMAT) if order.ship_date else None,
                     order.status.strip(),
+                    int(bool(order.is_paid)),
                     order.carrier.strip(),
                     order.tracking_number.strip(),
+                    order.notes.strip(),
                     order.total_amount,
+                    float(order.tax_rate),
+                    float(order.tax_amount),
+                    int(bool(order.tax_included_in_total)),
                     order.target_completion_date.strftime(_DATE_FORMAT)
                     if order.target_completion_date
                     else None,
@@ -143,8 +177,14 @@ def update_order(order_id: int, order: Order) -> None:
                     product_name,
                     product_description,
                     quantity,
-                    unit_price
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    unit_price,
+                    base_unit_cost,
+                    cost_components,
+                    is_freebie,
+                    applied_discount,
+                    applied_tax,
+                    price_adjustment_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -155,6 +195,12 @@ def update_order(order_id: int, order: Order) -> None:
                         item.product_description.strip(),
                         int(item.quantity),
                         float(item.unit_price),
+                        float(item.base_unit_cost),
+                        _serialize_components(item.cost_components),
+                        int(bool(getattr(item, "is_freebie", False))),
+                        float(getattr(item, "applied_discount", 0.0) or 0.0),
+                        float(getattr(item, "applied_tax", 0.0) or 0.0),
+                        str(getattr(item, "price_adjustment_note", "") or ""),
                     )
                     for item in order.items
                 ],
@@ -209,9 +255,14 @@ def fetch_orders(limit: int = 50) -> List[Order]:
                 o.order_date,
                 o.ship_date,
                 o.status,
+                o.is_paid,
                 o.carrier,
                 o.tracking_number,
+                o.notes,
                 o.total_amount,
+                o.tax_rate,
+                o.tax_amount,
+                o.tax_included_in_total,
                 o.target_completion_date
             FROM orders AS o
             WHERE UPPER(o.status) <> 'CANCELLED'
@@ -237,7 +288,13 @@ def fetch_orders(limit: int = 50) -> List[Order]:
                     product_name,
                     product_description,
                     quantity,
-                    unit_price
+                    unit_price,
+                    base_unit_cost,
+                    cost_components,
+                    is_freebie,
+                    applied_discount,
+                    applied_tax,
+                    price_adjustment_note
                 FROM order_items
                 WHERE order_id IN ({placeholder})
                 ORDER BY id
@@ -253,6 +310,12 @@ def fetch_orders(limit: int = 50) -> List[Order]:
                         unit_price=float(row["unit_price"]),
                         product_sku=(row["product_sku"] or ""),
                         product_id=row["product_id"],
+                        base_unit_cost=float(row["base_unit_cost"] or 0.0),
+                        cost_components=_deserialize_components(row["cost_components"]),
+                        is_freebie=bool(row["is_freebie"]),
+                        applied_discount=float(row["applied_discount"] or 0.0),
+                        applied_tax=float(row["applied_tax"] or 0.0),
+                        price_adjustment_note=row["price_adjustment_note"] or "",
                     )
                 )
             item_cursor.close()
@@ -268,8 +331,13 @@ def fetch_orders(limit: int = 50) -> List[Order]:
                     order_date=_parse_date(row["order_date"]),
                     ship_date=_parse_date(row["ship_date"]) if row["ship_date"] else None,
                     status=row["status"],
+                    is_paid=bool(row["is_paid"]),
                     carrier=row["carrier"] or "",
                     tracking_number=row["tracking_number"] or "",
+                    notes=row["notes"] or "",
+                    tax_rate=float(row["tax_rate"] or 0.0),
+                    tax_amount=float(row["tax_amount"] or 0.0),
+                    tax_included_in_total=bool(row["tax_included_in_total"]),
                     target_completion_date=_parse_date(row["target_completion_date"])
                     if row["target_completion_date"]
                     else None,
@@ -317,9 +385,14 @@ def fetch_order(order_id: int) -> Optional[Order]:
                 order_date,
                 ship_date,
                 status,
+                is_paid,
                 carrier,
                 tracking_number,
+                notes,
                 total_amount,
+                tax_rate,
+                tax_amount,
+                tax_included_in_total,
                 target_completion_date
             FROM orders
             WHERE id = ?
@@ -339,7 +412,13 @@ def fetch_order(order_id: int) -> Optional[Order]:
                 product_name,
                 product_description,
                 quantity,
-                unit_price
+                unit_price,
+                base_unit_cost,
+                cost_components,
+                is_freebie,
+                applied_discount,
+                applied_tax,
+                price_adjustment_note
             FROM order_items
             WHERE order_id = ?
             ORDER BY id
@@ -355,6 +434,12 @@ def fetch_order(order_id: int) -> Optional[Order]:
             unit_price=float(row["unit_price"]),
             product_sku=row["product_sku"] or "",
             product_id=row["product_id"],
+            base_unit_cost=float(row["base_unit_cost"] or 0.0),
+            cost_components=_deserialize_components(row["cost_components"]),
+            is_freebie=bool(row["is_freebie"]),
+            applied_discount=float(row["applied_discount"] or 0.0),
+            applied_tax=float(row["applied_tax"] or 0.0),
+            price_adjustment_note=row["price_adjustment_note"] or "",
         )
         for row in item_rows
     ]
@@ -367,11 +452,16 @@ def fetch_order(order_id: int) -> Optional[Order]:
         order_date=_parse_date(order_row["order_date"]),
         ship_date=_parse_date(order_row["ship_date"]) if order_row["ship_date"] else None,
         status=order_row["status"],
+        is_paid=bool(order_row["is_paid"]),
         carrier=order_row["carrier"] or "",
         tracking_number=order_row["tracking_number"] or "",
+        notes=order_row["notes"] or "",
         target_completion_date=_parse_date(order_row["target_completion_date"])
         if order_row["target_completion_date"]
         else None,
+        tax_rate=float(order_row["tax_rate"] or 0.0),
+        tax_amount=float(order_row["tax_amount"] or 0.0),
+        tax_included_in_total=bool(order_row["tax_included_in_total"]),
         items=items,
     )
 
@@ -487,13 +577,60 @@ def fetch_order_history(
 
 
 def fetch_total_sales() -> float:
+    total_sales, _, _ = fetch_financial_totals()
+    return total_sales
+
+
+def fetch_financial_totals() -> tuple[float, float, float]:
     with create_connection() as connection:
         cursor = connection.execute(
-            "SELECT IFNULL(SUM(total_amount), 0) AS total FROM orders WHERE UPPER(status) <> 'CANCELLED';"
+            """
+            SELECT
+                oi.quantity,
+                oi.unit_price,
+                oi.base_unit_cost,
+                oi.cost_components,
+                oi.is_freebie
+            FROM order_items AS oi
+            JOIN orders AS o ON o.id = oi.order_id
+            WHERE UPPER(o.status) <> 'CANCELLED'
+            """
         )
-        value = cursor.fetchone()["total"]
+        total_sales = 0.0
+        total_cost = 0.0
+        freebie_cost = 0.0
+        for row in cursor.fetchall():
+            quantity = int(row["quantity"] or 0)
+            unit_price = float(row["unit_price"] or 0.0)
+            base_cost = float(row["base_unit_cost"] or 0.0)
+            extras = sum(component.amount for component in _deserialize_components(row["cost_components"]))
+            line_cost = quantity * (base_cost + extras)
+            total_sales += quantity * unit_price
+            total_cost += line_cost
+            if bool(row["is_freebie"]):
+                freebie_cost += line_cost
         cursor.close()
-        return float(value)
+    return total_sales, total_cost, freebie_cost
+
+
+def fetch_tax_total(start_date: Optional[date] = None, end_date: Optional[date] = None) -> float:
+    with create_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT COALESCE(SUM(tax_amount), 0) AS total_tax
+            FROM orders
+            WHERE UPPER(status) <> 'CANCELLED'
+              AND (? IS NULL OR order_date >= ?)
+              AND (? IS NULL OR order_date <= ?)
+            """,
+            (
+                _format_date(start_date),
+                _format_date(start_date),
+                _format_date(end_date),
+                _format_date(end_date),
+            ),
+        ).fetchone()
+    return float(row["total_tax"] or 0.0)
 
 
 def fetch_product_sales_summary() -> List[ProductSalesSummary]:
@@ -501,31 +638,74 @@ def fetch_product_sales_summary() -> List[ProductSalesSummary]:
         cursor = connection.execute(
             """
             SELECT
-                CASE
-                    WHEN TRIM(oi.product_sku) = '' THEN oi.product_name
-                    WHEN p.name IS NULL OR TRIM(p.name) = '' THEN oi.product_sku
-                    ELSE oi.product_sku || ' - ' || p.name
-                END AS product_label,
-                SUM(oi.quantity) AS total_quantity,
-                SUM(oi.quantity * oi.unit_price) AS total_sales
+                oi.product_sku,
+                oi.product_name,
+                oi.product_description,
+                oi.quantity,
+                oi.unit_price,
+                oi.base_unit_cost,
+                oi.cost_components,
+                p.name AS product_record_name
             FROM order_items AS oi
             JOIN orders AS o ON o.id = oi.order_id
             LEFT JOIN products AS p ON p.sku = oi.product_sku
             WHERE UPPER(o.status) <> 'CANCELLED'
-            GROUP BY product_label
-            ORDER BY total_sales DESC, product_label ASC;
             """
         )
         rows = cursor.fetchall()
         cursor.close()
-        return [
+
+    aggregates: Dict[str, Dict[str, float | str]] = {}
+
+    for row in rows:
+        sku = (row["product_sku"] or "").strip()
+        order_name = (row["product_name"] or "").strip()
+        product_name = (row["product_record_name"] or "").strip() or order_name
+
+        if not sku:
+            label = order_name or product_name
+        elif product_name:
+            label = f"{sku} - {product_name}"
+        else:
+            label = sku
+
+        entry = aggregates.get(label)
+        if entry is None:
+            entry = {
+                "quantity": 0,
+                "sales": 0.0,
+                "cost": 0.0,
+            }
+            aggregates[label] = entry
+
+        quantity = int(row["quantity"] or 0)
+        unit_price = float(row["unit_price"] or 0.0)
+        base_cost = float(row["base_unit_cost"] or 0.0)
+        extras = sum(component.amount for component in _deserialize_components(row["cost_components"]))
+
+        entry["quantity"] += quantity
+        entry["sales"] += quantity * unit_price
+        entry["cost"] += quantity * (base_cost + extras)
+
+    summaries: List[ProductSalesSummary] = []
+    for label, data in aggregates.items():
+        total_sales = float(data["sales"])
+        total_cost = float(data["cost"])
+        profit = total_sales - total_cost
+        margin = profit / total_sales if total_sales else 0.0
+        summaries.append(
             ProductSalesSummary(
-                product_name=row["product_label"],
-                total_quantity=int(row["total_quantity"] or 0),
-                total_sales=float(row["total_sales"] or 0.0),
+                product_name=label,
+                total_quantity=int(data["quantity"]),
+                total_sales=total_sales,
+                total_cost=total_cost,
+                total_profit=profit,
+                margin=margin,
             )
-            for row in rows
-        ]
+        )
+
+    summaries.sort(key=lambda item: (-item.total_sales, item.product_name))
+    return summaries
 
 
 def fetch_top_customers(limit: int = 10) -> List[CustomerSalesSummary]:
@@ -533,34 +713,111 @@ def fetch_top_customers(limit: int = 10) -> List[CustomerSalesSummary]:
         cursor = connection.execute(
             """
             SELECT
+                o.id,
                 TRIM(o.customer_name) AS customer_name,
-                COUNT(*) AS order_count,
-                SUM(o.total_amount) AS total_sales,
-                CASE
-                    WHEN COUNT(*) = 0 THEN 0
-                    ELSE SUM(o.total_amount) / COUNT(*)
-                END AS average_order
+                o.total_amount
             FROM orders AS o
             WHERE TRIM(o.customer_name) <> ''
               AND UPPER(o.status) <> 'CANCELLED'
-            GROUP BY TRIM(o.customer_name)
-            ORDER BY total_sales DESC, customer_name ASC
-            LIMIT ?;
-            """,
-            (int(limit),),
+            """
         )
-        rows = cursor.fetchall()
+        order_rows = cursor.fetchall()
         cursor.close()
 
-    return [
-        CustomerSalesSummary(
-            customer_name=row["customer_name"],
-            order_count=int(row["order_count"] or 0),
-            total_sales=float(row["total_sales"] or 0.0),
-            average_order=float(row["average_order"] or 0.0),
+    if not order_rows:
+        return []
+
+    order_ids = [int(row["id"]) for row in order_rows]
+    items_by_order: Dict[int, List[OrderItem]] = {order_id: [] for order_id in order_ids}
+
+    with create_connection() as connection:
+        placeholder = ",".join("?" for _ in order_ids)
+        item_cursor = connection.cursor()
+        item_cursor.execute(
+            f"""
+            SELECT
+                order_id,
+                product_id,
+                product_sku,
+                product_name,
+                product_description,
+                quantity,
+                unit_price,
+                base_unit_cost,
+                cost_components,
+                is_freebie,
+                applied_discount,
+                applied_tax,
+                price_adjustment_note
+            FROM order_items
+            WHERE order_id IN ({placeholder})
+            ORDER BY id
+            """,
+            order_ids,
         )
-        for row in rows
-    ]
+        for row in item_cursor.fetchall():
+            items_by_order[int(row["order_id"])].append(
+                OrderItem(
+                    product_name=row["product_name"],
+                    product_description=row["product_description"],
+                    quantity=int(row["quantity"]),
+                    unit_price=float(row["unit_price"]),
+                    product_sku=row["product_sku"] or "",
+                    product_id=row["product_id"],
+                    base_unit_cost=float(row["base_unit_cost"] or 0.0),
+                    cost_components=_deserialize_components(row["cost_components"]),
+                    is_freebie=bool(row["is_freebie"]),
+                    applied_discount=float(row["applied_discount"] or 0.0),
+                    applied_tax=float(row["applied_tax"] or 0.0),
+                    price_adjustment_note=row["price_adjustment_note"] or "",
+                )
+            )
+        item_cursor.close()
+
+    aggregates: Dict[str, Dict[str, float | int]] = {}
+    for row in order_rows:
+        order_id = int(row["id"])
+        customer = row["customer_name"]
+        total_amount = float(row["total_amount"] or 0.0)
+        items = items_by_order.get(order_id, [])
+        total_cost = sum(item.line_cost for item in items)
+        profit = total_amount - total_cost
+
+        entry = aggregates.get(customer)
+        if entry is None:
+            entry = {
+                "orders": 0,
+                "sales": 0.0,
+                "cost": 0.0,
+            }
+            aggregates[customer] = entry
+
+        entry["orders"] += 1
+        entry["sales"] += total_amount
+        entry["cost"] += total_cost
+
+    summaries: List[CustomerSalesSummary] = []
+    for customer, data in aggregates.items():
+        total_sales = float(data["sales"])
+        total_cost = float(data["cost"])
+        profit = total_sales - total_cost
+        margin = profit / total_sales if total_sales else 0.0
+        order_count = int(data["orders"])
+        average_order = total_sales / order_count if order_count else 0.0
+        summaries.append(
+            CustomerSalesSummary(
+                customer_name=customer,
+                order_count=order_count,
+                total_sales=total_sales,
+                average_order=average_order,
+                total_cost=total_cost,
+                total_profit=profit,
+                margin=margin,
+            )
+        )
+
+    summaries.sort(key=lambda item: (-item.total_sales, item.customer_name))
+    return summaries[: max(0, int(limit))]
 
 
 def fetch_product_forecast(window_days: int = 30, limit: int = 25) -> List[ProductForecast]:
@@ -638,9 +895,12 @@ def fetch_outstanding_orders() -> List[OutstandingOrder]:
                 customer_name,
                 order_date,
                 total_amount,
+                tax_amount,
+                tax_included_in_total,
                 status,
                 carrier,
                 tracking_number,
+                                notes,
                 target_completion_date
             FROM orders
             WHERE UPPER(status) <> 'SHIPPED'
@@ -657,9 +917,12 @@ def fetch_outstanding_orders() -> List[OutstandingOrder]:
                 customer_name=row["customer_name"],
                 order_date=_parse_date(row["order_date"]),
                 total_amount=float(row["total_amount"]),
+                tax_amount=float(row["tax_amount"] or 0.0),
+                tax_included_in_total=bool(row["tax_included_in_total"]),
                 status=row["status"],
                 carrier=row["carrier"] or "",
                 tracking_number=row["tracking_number"] or "",
+                notes=row["notes"] or "",
                 target_completion_date=_parse_date(row["target_completion_date"])
                 if row["target_completion_date"]
                 else None,
@@ -679,9 +942,12 @@ def fetch_completed_orders(limit: int = 25) -> List[CompletedOrder]:
                 order_date,
                 ship_date,
                 total_amount,
+                tax_amount,
+                tax_included_in_total,
                 status,
                 carrier,
                 tracking_number,
+                notes,
                 target_completion_date
             FROM orders
             WHERE UPPER(status) = 'SHIPPED'
@@ -700,9 +966,12 @@ def fetch_completed_orders(limit: int = 25) -> List[CompletedOrder]:
                 order_date=_parse_date(row["order_date"]),
                 ship_date=_parse_date(row["ship_date"]) if row["ship_date"] else None,
                 total_amount=float(row["total_amount"]),
+                tax_amount=float(row["tax_amount"] or 0.0),
+                tax_included_in_total=bool(row["tax_included_in_total"]),
                 status=row["status"],
                 carrier=row["carrier"] or "",
                 tracking_number=row["tracking_number"] or "",
+                notes=row["notes"] or "",
                 target_completion_date=_parse_date(row["target_completion_date"])
                 if row["target_completion_date"]
                 else None,
@@ -717,7 +986,7 @@ def fetch_order_report(start_date: Optional[date], end_date: Optional[date]) -> 
         cursor.execute(
             """
             SELECT
-                o.id AS order_id,
+                o.id,
                 o.order_number,
                 o.customer_name,
                 o.order_date,
@@ -725,28 +994,16 @@ def fetch_order_report(start_date: Optional[date], end_date: Optional[date]) -> 
                 o.status,
                 o.carrier,
                 o.tracking_number,
+                o.notes,
                 o.total_amount,
-                o.target_completion_date,
-                IFNULL(SUM(oi.quantity), 0) AS total_items,
-                IFNULL(
-                    GROUP_CONCAT(
-                        (CASE
-                            WHEN TRIM(oi.product_sku) = '' THEN oi.product_name
-                            ELSE oi.product_sku || ' - ' || oi.product_name
-                         END) ||
-                        CASE WHEN TRIM(oi.product_description) = '' THEN ''
-                             ELSE ' (' || oi.product_description || ')'
-                        END || ' x' || oi.quantity,
-                        ', '
-                    ),
-                    ''
-                ) AS products
+                o.tax_rate,
+                o.tax_amount,
+                o.tax_included_in_total,
+                o.target_completion_date
             FROM orders AS o
-            LEFT JOIN order_items AS oi ON oi.order_id = o.id
             WHERE (? IS NULL OR o.order_date >= ?)
               AND (? IS NULL OR o.order_date <= ?)
-                            AND UPPER(o.status) <> 'CANCELLED'
-            GROUP BY o.id
+              AND UPPER(o.status) <> 'CANCELLED'
             ORDER BY o.order_date DESC;
             """,
             (
@@ -756,11 +1013,73 @@ def fetch_order_report(start_date: Optional[date], end_date: Optional[date]) -> 
                 _format_date(end_date),
             ),
         )
-        rows = cursor.fetchall()
+        order_rows = cursor.fetchall()
         cursor.close()
-        return [
+
+    if not order_rows:
+        return []
+
+    order_ids = [int(row["id"]) for row in order_rows]
+    items_by_order: dict[int, List[OrderItem]] = {order_id: [] for order_id in order_ids}
+
+    with create_connection() as connection:
+        placeholder = ",".join("?" for _ in order_ids)
+        item_cursor = connection.cursor()
+        item_cursor.execute(
+            f"""
+            SELECT
+                order_id,
+                product_id,
+                product_sku,
+                product_name,
+                product_description,
+                quantity,
+                unit_price,
+                base_unit_cost,
+                cost_components,
+                is_freebie,
+                applied_discount,
+                applied_tax,
+                price_adjustment_note
+            FROM order_items
+            WHERE order_id IN ({placeholder})
+            ORDER BY id
+            """,
+            order_ids,
+        )
+        for row in item_cursor.fetchall():
+            items_by_order[int(row["order_id"])].append(
+                OrderItem(
+                    product_name=row["product_name"],
+                    product_description=row["product_description"],
+                    quantity=int(row["quantity"]),
+                    unit_price=float(row["unit_price"]),
+                    product_sku=row["product_sku"] or "",
+                    product_id=row["product_id"],
+                    base_unit_cost=float(row["base_unit_cost"] or 0.0),
+                    cost_components=_deserialize_components(row["cost_components"]),
+                    is_freebie=bool(row["is_freebie"]),
+                    applied_discount=float(row["applied_discount"] or 0.0),
+                    applied_tax=float(row["applied_tax"] or 0.0),
+                    price_adjustment_note=row["price_adjustment_note"] or "",
+                )
+            )
+        item_cursor.close()
+
+    report_rows: List[OrderReportRow] = []
+    for row in order_rows:
+        order_id = int(row["id"])
+        items = items_by_order.get(order_id, [])
+        total_amount = float(row["total_amount"])
+        total_cost = sum(item.line_cost for item in items)
+        freebie_cost = sum(
+            item.line_cost for item in items if getattr(item, "is_freebie", False)
+        )
+        profit = total_amount - total_cost
+        margin = profit / total_amount if total_amount else 0.0
+        report_rows.append(
             OrderReportRow(
-                order_id=int(row["order_id"]),
+                order_id=order_id,
                 order_number=row["order_number"],
                 customer_name=row["customer_name"],
                 order_date=_parse_date(row["order_date"]),
@@ -768,19 +1087,38 @@ def fetch_order_report(start_date: Optional[date], end_date: Optional[date]) -> 
                 status=row["status"],
                 carrier=row["carrier"] or "",
                 tracking_number=row["tracking_number"] or "",
-                total_amount=float(row["total_amount"]),
-                products=row["products"],
-                item_count=int(row["total_items"] or 0),
+                notes=row["notes"] or "",
+                total_amount=total_amount,
+                tax_rate=float(row["tax_rate"] or 0.0),
+                tax_amount=float(row["tax_amount"] or 0.0),
+                tax_included_in_total=bool(row["tax_included_in_total"]),
+                products=_format_report_products(items),
+                item_count=sum(item.quantity for item in items),
                 target_completion_date=_parse_date(row["target_completion_date"])
                 if row["target_completion_date"]
                 else None,
+                total_cost=total_cost,
+                profit=profit,
+                margin=margin,
+                freebie_cost=freebie_cost,
+                adjustment_summary=_summarize_adjustments(items),
             )
-            for row in rows
-        ]
+        )
+
+    return report_rows
 
 
 def build_dashboard_snapshot() -> DashboardSnapshot:
-    total_sales = fetch_total_sales()
+    total_sales, total_cost, freebie_cost = fetch_financial_totals()
+    tax_total = fetch_tax_total()
+    total_profit = total_sales - total_cost
+    net_sales = total_sales - freebie_cost
+    if net_sales > 0:
+        margin = total_profit / net_sales
+    elif total_sales > 0:
+        margin = total_profit / total_sales
+    else:
+        margin = 0.0
     product_breakdown = fetch_product_sales_summary()
     outstanding_details = fetch_outstanding_orders()
     completed_details = fetch_completed_orders()
@@ -790,6 +1128,9 @@ def build_dashboard_snapshot() -> DashboardSnapshot:
     completed_count = len(completed_details)
     return DashboardSnapshot(
         total_sales=total_sales,
+        total_cost=total_cost,
+        total_profit=total_profit,
+        profit_margin=margin,
         outstanding_orders=outstanding_count,
         product_breakdown=product_breakdown,
         outstanding_details=outstanding_details,
@@ -797,6 +1138,9 @@ def build_dashboard_snapshot() -> DashboardSnapshot:
         completed_details=completed_details,
         top_customers=top_customers,
         inventory_forecast=inventory_forecast,
+        freebie_cost=freebie_cost,
+        net_sales=net_sales,
+        tax_total=tax_total,
     )
 
 
@@ -838,3 +1182,70 @@ def _parse_timestamp(raw: str) -> datetime:
             return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             return datetime.utcnow()
+
+
+def _format_report_products(items: Iterable[OrderItem]) -> str:
+    parts: List[str] = []
+    for item in items:
+        prefix = item.product_sku.strip()
+        if prefix:
+            label = f"{prefix} - {item.product_name}"
+        else:
+            label = item.product_name
+        description = item.product_description.strip()
+        if description:
+            label = f"{label} ({description})"
+        summary = item.adjustment_summary.strip()
+        if summary:
+            label = f"{label} [{summary}]"
+        parts.append(f"{label} x{item.quantity}")
+    return ", ".join(parts)
+
+
+def _summarize_adjustments(items: Iterable[OrderItem]) -> str:
+    details: List[str] = []
+    for item in items:
+        summary = item.adjustment_summary.strip()
+        if not summary:
+            continue
+        label = item.product_name.strip() or item.product_sku.strip() or "Item"
+        details.append(f"{label}: {summary}")
+    return "; ".join(details)
+
+
+def _deserialize_components(raw: object) -> List[CostComponent]:
+    if raw is None:
+        return []
+    text = str(raw).strip()
+    if not text:
+        return []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    components: List[CostComponent] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label", "")).strip()
+        amount = entry.get("amount", 0)
+        try:
+            amount_value = float(amount)
+        except (TypeError, ValueError):
+            amount_value = 0.0
+        if not label and amount_value == 0.0:
+            continue
+        components.append(CostComponent(label=label, amount=amount_value))
+    return components
+
+
+def _serialize_components(components: Iterable[CostComponent]) -> str:
+    payload = [
+        {
+            "label": component.label,
+            "amount": float(component.amount),
+        }
+        for component in components
+    ]
+    return json.dumps(payload)
