@@ -17,6 +17,20 @@ HustleNest is a PySide6 desktop application for tracking product orders, monitor
 - Saving an updated order now clears the selection so the entry form is ready for the next record immediately.
 - Product selection, quantity, and pricing controls on the Orders tab now include inline labels and tooltips for quicker orientation.
 - Exported invoices omit the placeholder comments block so PDFs only show content you provide.
+  
+<img width="1902" height="1122" alt="Image" src="https://github.com/user-attachments/assets/3fadba1e-733b-46e1-bc80-f0ad7e17914d" />
+
+<img width="1902" height="1122" alt="Image" src="https://github.com/user-attachments/assets/2d9ab96b-6f74-4861-980b-5470b6a29b6e" />
+
+<img width="1902" height="1122" alt="Image" src="https://github.com/user-attachments/assets/c2523e58-a7c2-4ee2-943a-cc58f51fac8a" />
+
+<img width="1813" height="1067" alt="Image" src="https://github.com/user-attachments/assets/51c3546a-c835-488a-9622-8ee59d72d2ed" />
+
+<img width="1902" height="1122" alt="Image" src="https://github.com/user-attachments/assets/b1935985-ffda-4229-b081-4dbfdd4503f0" />
+
+<img width="1902" height="1122" alt="Image" src="https://github.com/user-attachments/assets/67a33f89-422e-4d22-9660-a66ea0a85be1" />
+
+<img width="1902" height="1122" alt="Image" src="https://github.com/user-attachments/assets/d3a57fd2-f363-4a37-a70e-183ce2ae0a84" />
 
 ## Installation
 
@@ -91,3 +105,4 @@ README.md
 ## License
 
 This project currently has no explicit license. Add one if you plan to distribute the application.
+
