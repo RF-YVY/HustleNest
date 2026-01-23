@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-01-10
+
+### Added
+- Sales tax summaries can export quarterly and year-end reports to CSV or PDF.
+- CRM tab can import contacts sourced from historical orders to seed outreach campaigns.
+
+### Changed
+- Losses and expenses entries now share the materials category dropdown for consistent tagging across business tools.
+
 ## [2.1.1] - 2026-01-09
 
 ### Changed
