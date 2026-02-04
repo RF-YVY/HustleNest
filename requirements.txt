@@ -1,1 +1,10 @@
 PySide6>=6.6
+google-api-python-client>=2.146.0
+google-auth>=2.27.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+requests>=2.31.0
+dropbox>=11.36.0
+msal>=1.25.0
+paramiko>=3.4.0
+openpyxl>=3.1.0

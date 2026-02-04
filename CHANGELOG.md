@@ -2,7 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [3.0] - 2026-02-04
+
+### Added
+- **Dark Mode**: New appearance settings with full dark/light theme toggle that persists across sessions.
+- **Dashboard Customization**: Collapsible/hideable dashboard sections with click-to-toggle headers. Configure visibility and default state in Advanced Settings → Dashboard.
+- **Soft Delete & Trash**: Deleted orders and products are now moved to a "Recently Deleted" area instead of being permanently removed. Restore or permanently delete items from Settings → Recently Deleted.
+- **Multiple Chart Types**: Enhanced Graphs tab with chart type selector (Bar, Line, Pie, Customer Breakdown).
+- **Advanced Settings Dialog**: Centralized access to Theme, Dashboard, Backup, Import, and Export features.
+- **Database Backup Scheduler**: Automatic daily/weekly backups with configurable retention, backup folder selection, and one-click restore.
+- **Data Import Wizard**: Import products from CSV or Excel files with intelligent column auto-mapping.
+- **PDF Report Export**: Generate professional PDF reports including:
+  - Sales Report with order details
+  - Inventory Report with stock levels and values
+  - Profit & Loss Statement
+  - Customer Report with rankings
+  - Period Comparison (month vs month, quarter vs quarter, year vs year)
+- **Skip Version Updates**: Update notifications now include "Skip This Version" and "Download" buttons.
+
+### Changed
+- Added `openpyxl` to requirements for Excel file import support.
+
+## [2.2.1] - 2026-02-02
+
+### Fixed
+- Included cloud sync dependencies in the Windows installer build so `requests` is bundled.
 
 ## [2.2.0] - 2026-01-10
 

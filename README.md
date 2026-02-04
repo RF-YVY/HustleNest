@@ -1,6 +1,6 @@
 # HustleNest
 
-Version: **v2.2.0**
+Version: **v3.0**
 
 HustleNest is a PySide6 desktop application for tracking product orders, monitoring fulfillment, and visualizing sales performance. All data lives locally in a SQLite database created automatically on first launch. The UI combines dashboards, detailed order entry, forecasting, and reporting tailored for small business workflows.
 
@@ -11,12 +11,19 @@ HustleNest is a PySide6 desktop application for tracking product orders, monitor
 - Local SQLite storage with repository helpers for analytics and reporting.
 - Configurable payment methods and branded invoice PDFs generated in-app.
 - Built-in update checker pointed at the HustleNest GitHub repository.
+- **Dark/Light theme support** with persistent preferences.
+- **Automatic database backups** with scheduling and one-click restore.
+- **Data import wizard** for CSV and Excel files.
+- **PDF report exports** including Sales, Inventory, P&L, and Period Comparison reports.
 
-## What's New in 2.2.0
+## What's New in 3.0
 
-- Losses and expenses tabs now share the material categories dropdown for consistent tagging across business tools.
-- Reports tab includes quarterly and year-end sales tax summaries with one-click CSV or PDF exports using the configured tax rate.
-- CRM tab can import contacts from historical orders in one step to seed outreach efforts.
+- **Dark Mode**: Full dark/light theme toggle in Advanced Settings.
+- **Database Backup Scheduler**: Automatic daily/weekly backups with configurable retention and restore functionality.
+- **Data Import Wizard**: Import products from CSV or Excel files with intelligent column mapping.
+- **PDF Report Exports**: Generate professional reports (Sales, Inventory, P&L, Customer, Period Comparison).
+- **Skip Version Updates**: Update notifications now include a "Skip This Version" option.
+- Various improvements and bug fixes.
 
 ## Installation
 
