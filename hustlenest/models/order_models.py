@@ -240,6 +240,7 @@ class OrderDestination:
     city: str
     state: str
     count: int
+    postal_code: str = ""
     order_numbers: List[str] = field(default_factory=list)
 
 

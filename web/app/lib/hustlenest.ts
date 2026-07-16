@@ -300,6 +300,8 @@ export type GeographyWorkspaceData = {
     state: string;
     state_name: string;
     count: number;
+    latitude: number | null;
+    longitude: number | null;
     order_numbers: string[];
     orders: Array<{ id: number; number: string; customer: string; status: string; total: string }>;
   }>;

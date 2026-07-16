@@ -1,11 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_data_files
+
 
 a = Analysis(
     ['hustlenest\\main.py'],
     pathex=[],
     binaries=[],
-    datas=[('HustleNest.ico', '.')],
+    datas=[('HustleNest.ico', '.')] + collect_data_files('zipcodes'),
     hiddenimports=[
         'requests',
         'hustlenest.services.cloud_sync_service',

@@ -567,6 +567,8 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertEqual(geography["home"], {"city": "Austin", "state": "TX", "configured": True})
         austin = next(item for item in geography["destinations"] if item["city"] == "Austin")
         self.assertEqual(austin["state_name"], "Texas")
+        self.assertAlmostEqual(austin["latitude"], 30.2672, places=3)
+        self.assertAlmostEqual(austin["longitude"], -97.7423, places=3)
         self.assertEqual(austin["orders"][0]["id"], texas_order_id)
         self.assertEqual(austin["orders"][0]["number"], "HN-TX-001")
 

@@ -9,11 +9,13 @@ import logging
 import mimetypes
 import shutil
 import sqlite3
+import zipcodes
 from math import isfinite
 import threading
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1035,6 +1037,29 @@ def home_workspace() -> dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=512)
+def _destination_coordinates(postal_code: str, city: str, state: str) -> tuple[Optional[float], Optional[float]]:
+    matches = zipcodes.matching(postal_code) if postal_code else zipcodes.filter_by(city=city, state=state)
+    alias_match = False
+    if not matches:
+        city_key = city.strip().casefold()
+        matches = [
+            item for item in zipcodes.filter_by(state=state)
+            if any(str(name).casefold() == city_key for name in [item.get("city", ""), *item.get("acceptable_cities", []), *item.get("unacceptable_cities", [])])
+        ]
+        alias_match = bool(matches)
+    coordinate = next((item for item in matches if item.get("active") and item.get("lat") and item.get("long")), None)
+    if coordinate is None:
+        return None, None
+    latitude = float(coordinate["lat"])
+    longitude = float(coordinate["long"])
+    if alias_match:
+        digest = hashlib.sha256(f"{city}:{state}".encode("utf-8")).digest()
+        latitude += (digest[0] / 255 - .5) * .08
+        longitude += (digest[1] / 255 - .5) * .08
+    return latitude, longitude
+
+
 def geography_workspace() -> dict[str, Any]:
     destinations = order_service.list_order_destinations()
     orders = order_repository.fetch_orders(200)
@@ -1045,12 +1070,15 @@ def geography_workspace() -> dict[str, Any]:
         state = destination.state.strip().upper()
         state_counts[state] = state_counts.get(state, 0) + destination.count
         related = [order_index[number] for number in destination.order_numbers if number in order_index]
+        latitude, longitude = _destination_coordinates(destination.postal_code, destination.city, state)
         payload.append({
             "key": f"{destination.city.casefold()}:{state.casefold()}",
             "city": destination.city,
             "state": state,
             "state_name": US_STATE_NAMES.get(state, state),
             "count": destination.count,
+            "latitude": latitude,
+            "longitude": longitude,
             "order_numbers": destination.order_numbers,
             "orders": [
                 {"id": order.id, "number": order.order_number, "customer": order.customer_name, "status": order.status, "total": _money(order.display_total)}

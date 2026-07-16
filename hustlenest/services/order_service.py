@@ -59,7 +59,7 @@ _PRODUCT_STATUSES: List[str] = [
 _DEFAULT_ORDER_NUMBER_FORMAT = "ORD-{seq:04d}"
 _SEQUENCE_PATTERN = re.compile(r"(\d+)(?!.*\d)")
 _CITY_STATE_PATTERN = re.compile(
-    r"(?P<city>.+?),\s*(?P<state>[A-Za-z]{2})(?:\s+\d{5}(?:-\d{4})?)?$"
+    r"(?P<city>.+?),\s*(?P<state>[A-Za-z]{2})(?:\s+(?P<zip>\d{5})(?:-\d{4})?)?$"
 )
 _SKU_ALIASES: Dict[str, str] = {
     "BC-0001": "BMETAL-CARD",
@@ -348,12 +348,14 @@ def list_order_destinations() -> List[OrderDestination]:
         parsed = _extract_city_state(address)
         if parsed is None:
             continue
-        city, state = parsed
+        city, state, postal_code = parsed
         key = (city, state)
         destination = aggregates.get(key)
         if destination is None:
-            destination = OrderDestination(city=city, state=state, count=0)
+            destination = OrderDestination(city=city, state=state, count=0, postal_code=postal_code)
             aggregates[key] = destination
+        elif not destination.postal_code and postal_code:
+            destination.postal_code = postal_code
         destination.count += 1
         destination.order_numbers.append(order_number)
 
@@ -1743,7 +1745,7 @@ def _summarize_item_quantities(items: Iterable[OrderItem]) -> Dict[str, int]:
     return totals
 
 
-def _extract_city_state(address: str) -> Optional[Tuple[str, str]]:
+def _extract_city_state(address: str) -> Optional[Tuple[str, str, str]]:
     normalized = address.replace("\r", "\n")
     segments = [segment.strip() for segment in normalized.split("\n") if segment.strip()]
     for segment in reversed(segments):
@@ -1752,7 +1754,7 @@ def _extract_city_state(address: str) -> Optional[Tuple[str, str]]:
             city = match.group("city").strip()
             state = match.group("state").strip().upper()
             if city and state:
-                return city, state
+                return city, state, (match.group("zip") or "").strip()
 
     condensed = " ".join(segments)
     match = _CITY_STATE_PATTERN.search(condensed)
@@ -1760,6 +1762,6 @@ def _extract_city_state(address: str) -> Optional[Tuple[str, str]]:
         city = match.group("city").strip()
         state = match.group("state").strip().upper()
         if city and state:
-            return city, state
+            return city, state, (match.group("zip") or "").strip()
 
     return None
