@@ -99,11 +99,12 @@ def run(
     if not (web_directory / "dist" / "server" / "index.js").is_file():
         raise RuntimeError("The browser production build is missing. Run `npm install` and `npm run build` in the web directory.")
     node = _node_executable()
-    vinext = web_directory / "node_modules" / "vinext" / "dist" / "cli.js"
-    if not node or not vinext.is_file():
+    local_server = web_directory / "start-local.mjs"
+    vinext_server = web_directory / "node_modules" / "vinext" / "dist" / "server" / "prod-server.js"
+    if not node or not local_server.is_file() or not vinext_server.is_file():
         raise RuntimeError("Node.js and the installed browser dependencies are required. Run `npm install` in the web directory.")
 
-    command = [node, str(vinext), "start", "-H", frontend_host, "-p", str(frontend_port)]
+    command = [node, str(local_server), "-H", frontend_host, "-p", str(frontend_port)]
     creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     frontend = subprocess.Popen(command, cwd=web_directory, creationflags=creation_flags)
     try:

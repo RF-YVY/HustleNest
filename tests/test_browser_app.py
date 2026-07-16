@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -28,8 +29,9 @@ class BrowserAppLauncherTests(unittest.TestCase):
             (web / "package.json").write_text("{}", encoding="utf-8")
             (web / "dist" / "server").mkdir(parents=True)
             (web / "dist" / "server" / "index.js").write_text("", encoding="utf-8")
-            (web / "node_modules" / "vinext" / "dist").mkdir(parents=True)
-            (web / "node_modules" / "vinext" / "dist" / "cli.js").write_text("", encoding="utf-8")
+            (web / "node_modules" / "vinext" / "dist" / "server").mkdir(parents=True)
+            (web / "node_modules" / "vinext" / "dist" / "server" / "prod-server.js").write_text("", encoding="utf-8")
+            (web / "start-local.mjs").write_text("", encoding="utf-8")
             process = MagicMock(spec=subprocess.Popen)
             process.poll.return_value = None
             with (
@@ -41,7 +43,10 @@ class BrowserAppLauncherTests(unittest.TestCase):
             ):
                 browser_app.run(web_directory=web, frontend_port=3010, backend_port=8877)
             popen.assert_called_once()
-            self.assertEqual(popen.call_args.args[0][-5:], ["start", "-H", "127.0.0.1", "-p", "3010"])
+            self.assertEqual(
+                popen.call_args.args[0],
+                ["node.exe", str(web.resolve() / "start-local.mjs"), "-H", "127.0.0.1", "-p", "3010"],
+            )
             wait.assert_called_once_with(process, "127.0.0.1", 3010)
             backend.assert_called_once_with("127.0.0.1", 8877, "http://localhost:3010")
             stop.assert_called_once_with(process, 3010)
@@ -70,6 +75,14 @@ class BrowserAppLauncherTests(unittest.TestCase):
                 try:
                     with urllib.request.urlopen("http://127.0.0.1:3011/", timeout=1) as frontend:
                         page = frontend.read().decode("utf-8")
+                    stylesheet_path = re.search(r'href="([^"]+\.css)"', page)
+                    if not stylesheet_path:
+                        self.fail("Frontend HTML did not reference its compiled stylesheet.")
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:3011{stylesheet_path.group(1)}", timeout=1
+                    ) as stylesheet:
+                        stylesheet_type = stylesheet.headers.get_content_type()
+                        stylesheet_body = stylesheet.read().decode("utf-8")
                     with urllib.request.urlopen("http://127.0.0.1:8766/health", timeout=1) as backend:
                         health = backend.read().decode("utf-8")
                     break
@@ -78,6 +91,8 @@ class BrowserAppLauncherTests(unittest.TestCase):
             else:
                 self.fail("Unified launcher did not become ready.")
             self.assertIn("HustleNest", page)
+            self.assertEqual(stylesheet_type, "text/css")
+            self.assertIn(".app-shell", stylesheet_body)
             self.assertIn('"status":"ready"', health)
         finally:
             if process.poll() is None:
