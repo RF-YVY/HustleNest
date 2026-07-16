@@ -16,6 +16,18 @@ from hustlenest import browser_app
 
 
 class BrowserAppLauncherTests(unittest.TestCase):
+    def test_bundled_runtime_is_preferred_when_frozen(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime"
+            runtime.mkdir()
+            executable = runtime / ("node.exe" if os.name == "nt" else "node")
+            executable.write_bytes(b"")
+            with (
+                patch.object(sys, "frozen", True, create=True),
+                patch.object(sys, "_MEIPASS", directory, create=True),
+            ):
+                self.assertEqual(browser_app._node_executable(), str(executable))
+
     def test_wait_for_frontend_rejects_early_process_exit(self) -> None:
         process = MagicMock()
         process.poll.return_value = 2

@@ -847,7 +847,7 @@ def about_workspace() -> dict[str, str]:
     return {
         "app_name": "HustleNest",
         "app_version": APP_VERSION,
-        "browser_version": "0.35.0",
+        "browser_version": "4.0.0",
         "repository_url": REPOSITORY_URL,
         "releases_url": RELEASES_URL,
         "runtime": "Local Python backend + browser UI",

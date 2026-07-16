@@ -21,7 +21,7 @@ class PackageIdentityTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         legacy_name = "cyber" + "lablog"
         spec = (root / "HustleNest.spec").read_text(encoding="utf-8").casefold()
-        self.assertIn(r"hustlenest\\main.py", spec)
+        self.assertIn(r"hustlenest\\browser_app.py", spec)
         self.assertNotIn(legacy_name, spec)
 
 

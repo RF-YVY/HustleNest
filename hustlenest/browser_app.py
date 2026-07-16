@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from . import web_bridge
+from hustlenest import web_bridge
 
 
 def _raise_keyboard_interrupt(_signum: int, _frame: object) -> None:
@@ -20,10 +20,17 @@ def _raise_keyboard_interrupt(_signum: int, _frame: object) -> None:
 
 
 def _default_web_directory() -> Path:
+    bundled = Path(getattr(sys, "_MEIPASS", "")) / "web"
+    if getattr(sys, "frozen", False) and bundled.is_dir():
+        return bundled
     return Path(__file__).resolve().parent.parent / "web"
 
 
 def _node_executable() -> Optional[str]:
+    if getattr(sys, "frozen", False):
+        bundled = Path(getattr(sys, "_MEIPASS", "")) / "runtime" / ("node.exe" if os.name == "nt" else "node")
+        if bundled.is_file():
+            return str(bundled)
     return shutil.which("node.exe" if os.name == "nt" else "node")
 
 

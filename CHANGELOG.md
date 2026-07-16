@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.0] - 2026-07-16
+
+### Added
+- Complete browser workspaces for orders, customers, products, materials, vendors, finance, reports, history, geography, documents, trash, and settings.
+- Persistent Light, Dark, Minty, Solar, Mission Control, and Glass themes with adjustable application text sizing.
+- Browser-editable business identity, logo, owner profile, avatar, launch-browser preference, backup, import, and cloud-sync settings.
+- Interactive multi-destination OpenStreetMap sales view with an offline state-grid alternative.
+- Global search, Quick Add, revision-safe editing, guarded database restore, and expanded browser report exports.
+
+### Changed
+- The packaged Windows application now launches the browser UI and local Python backend as one application.
+- Customer lists merge CRM contacts with names found only in historical orders.
+- Navigation and record workflows were regrouped around sales, business operations, and analysis.
+
+### Fixed
+- Corrected material insertion so all 13 database columns receive matching values.
+- Restored Geography rendering and display of all shipped destinations.
+- Improved Mission Control contrast and replaced the Terminal theme with a fixed-background Glass theme.
+
 ## [3.0] - 2026-02-04
 
 ### Added

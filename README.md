@@ -1,29 +1,28 @@
 # HustleNest
 
-Version: **v3.0**
+Version: **v4.0**
 
-HustleNest is a PySide6 desktop application for tracking product orders, monitoring fulfillment, and visualizing sales performance. All data lives locally in a SQLite database created automatically on first launch. The UI combines dashboards, detailed order entry, forecasting, and reporting tailored for small business workflows.
+HustleNest is a local-first business workspace with a browser interface and a Python backend. It brings orders, customers, inventory, vendors, finance, reports, documents, and settings into one smooth workflow while keeping business data in a local SQLite database.
+
+![HustleNest v4.0 sales geography](docs/images/hustlenest-v4-geography.png)
 
 ## Highlights
 
-- Dashboard with revenue, order pipeline, and inventory insights.
-- Order management with product line items, paid-status toggle, and invoice export.
-- Local SQLite storage with repository helpers for analytics and reporting.
-- Configurable payment methods and branded invoice PDFs generated in-app.
-- Built-in update checker pointed at the HustleNest GitHub repository.
-- **Dark/Light theme support** with persistent preferences.
-- **Automatic database backups** with scheduling and one-click restore.
-- **Data import wizard** for CSV and Excel files.
-- **PDF report exports** including Sales, Inventory, P&L, and Period Comparison reports.
+- Connected browser workspaces for orders, customers, products, materials, vendors, finance, reports, history, geography, documents, trash, and settings.
+- Local SQLite storage, automatic backups, guarded restore, CSV/XLSX import, and optional cloud synchronization.
+- Global search, Quick Add, workflow shortcuts, revision-safe editing, and branded invoice and report exports.
+- Six persistent themes, adjustable text size, editable business identity, and owner profile controls.
+- Interactive sales geography with all shipped destinations shown together on an OpenStreetMap view.
+- Configurable browser launch behavior: system default, a selected work browser, or manual opening.
 
-## What's New in 3.0
+## What's New in 4.0
 
-- **Dark Mode**: Full dark/light theme toggle in Advanced Settings.
-- **Database Backup Scheduler**: Automatic daily/weekly backups with configurable retention and restore functionality.
-- **Data Import Wizard**: Import products from CSV or Excel files with intelligent column mapping.
-- **PDF Report Exports**: Generate professional reports (Sales, Inventory, P&L, Customer, Period Comparison).
-- **Skip Version Updates**: Update notifications now include a "Skip This Version" option.
-- Various improvements and bug fixes.
+- **Browser-first application**: The Windows launcher now starts the production browser workspace and local backend together.
+- **Complete workflow migration**: Core sales, CRM, inventory, finance, reporting, document, trash, backup, import, cloud-sync, and settings workflows are available in the browser.
+- **Refined appearance**: Light, Dark, Minty, Solar, Mission Control, and Glass themes plus application-wide text scaling.
+- **Business identity controls**: Edit the owner profile, avatar, business details, and logo directly in Settings.
+- **Destination map**: View every shipped destination at once, with market summaries and direct order navigation.
+- **Data completeness and reliability**: Historical order-only customers remain visible, stale edits are guarded, and material creation no longer fails with the `12 values for 13 columns` database error.
 
 ## Installation
 
@@ -35,13 +34,17 @@ HustleNest is a PySide6 desktop application for tracking product orders, monitor
 
 ### Option 2: Run from source
 
-Windows 10 or later with Python 3.11 is required.
+Windows 10 or later with Python 3.11 and Node.js 22 is required when running from source.
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python -m hustlenest.main
+cd web
+npm install
+npm run build
+cd ..
+python -m hustlenest.browser_app
 ```
 
 On first run a database file appears at `%LOCALAPPDATA%\HustleNest\hustlenest.db`. Deleting that file resets all application data.
@@ -49,7 +52,7 @@ On first run a database file appears at `%LOCALAPPDATA%\HustleNest\hustlenest.db
 ## Running the App
 
 - Installer build: launch HustleNest from Start > HustleNest > HustleNest.
-- Source build: run `python -m hustlenest.main` from an activated virtual environment.
+- Source build: run `python -m hustlenest.browser_app` after building the browser workspace.
 
 Invoices export as PDFs through the Invoice Manager dialog, which launches when you select an order and choose **Export Invoice**.
 
@@ -98,9 +101,9 @@ History adds a searchable, date-filtered audit trail for order changes,
 payments, status updates, and financial deltas, with CSV export and direct
 navigation back to available orders. The same timeline appears inside each
 order detail view.
-Sales Geography replaces the desktop map with an offline-friendly state tile
-map, home-base context, destination rankings, city search, and direct links to
-the orders behind each market—without requiring external map or geocoding services.
+Sales Geography includes an interactive OpenStreetMap view that displays every
+shipped destination together, plus an offline-friendly state grid, home-base
+context, destination rankings, city search, and direct links to market orders.
 Home now acts as a connected command center for attention items, cash outlook,
 sales momentum, goals, recent orders, and direct workflow shortcuts.
 Goals can be created and edited from Home with automatic business metrics or

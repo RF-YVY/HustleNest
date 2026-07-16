@@ -1,13 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import shutil
+
+from PyInstaller.building.datastruct import Tree
 from PyInstaller.utils.hooks import collect_data_files
+
+node_executable = shutil.which('node.exe')
+if not node_executable:
+    raise SystemExit('Node.js 22 or later is required to build HustleNest.')
+web_datas = [
+    ('web\\start-local.mjs', 'web'),
+    ('web\\package.json', 'web'),
+]
 
 
 a = Analysis(
-    ['hustlenest\\main.py'],
+    ['hustlenest\\browser_app.py'],
     pathex=[],
-    binaries=[],
-    datas=[('HustleNest.ico', '.')] + collect_data_files('zipcodes'),
+    binaries=[(node_executable, 'runtime')],
+    datas=[('HustleNest.ico', '.')] + collect_data_files('zipcodes') + web_datas,
     hiddenimports=[
         'requests',
         'hustlenest.services.cloud_sync_service',
@@ -20,6 +31,8 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+a.datas += Tree('web\\dist', prefix='web\\dist')
+a.datas += Tree('web\\node_modules\\vinext', prefix='web\\node_modules\\vinext')
 pyz = PYZ(a.pure)
 
 exe = EXE(
