@@ -45,6 +45,10 @@ _DEFAULTS: Dict[str, str] = {
     "dashboard_sections_json": "{}",
     "browser_launch_mode": "system",
     "browser_id": "",
+    "profile_display_name": "River Young",
+    "profile_role": "Owner",
+    "profile_email": "",
+    "profile_avatar_path": "",
 }
 
 

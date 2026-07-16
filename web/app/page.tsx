@@ -688,6 +688,10 @@ export default function HustleNestWorkspace() {
         showBusinessName={settings?.business.show_name_on_dashboard}
         logoAvailable={settings?.business.logo_available}
         brandingRevision={settings?.summary.revision}
+        profileName={settings?.profile.display_name}
+        profileRole={settings?.profile.role}
+        profileInitials={settings?.profile.initials}
+        profileAvatarAvailable={settings?.profile.avatar_available}
       />
 
       <section className="main-column">

@@ -68,6 +68,7 @@ MUTATION_LOCK = threading.RLock()
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_PRODUCT_PHOTO_BYTES = 8 * 1024 * 1024
 MAX_BRAND_LOGO_BYTES = 8 * 1024 * 1024
+MAX_PROFILE_AVATAR_BYTES = 5 * 1024 * 1024
 MAX_IMPORT_BYTES = 12 * 1024 * 1024
 MAX_JSON_BODY_BYTES = 30 * 1024 * 1024
 
@@ -1570,6 +1571,13 @@ def _resolve_dashboard_logo(path_value: str) -> Optional[Path]:
     return resolved if resolved.is_file() else None
 
 
+def _profile_initials(display_name: str) -> str:
+    words = [word for word in display_name.replace("-", " ").split() if word]
+    if not words:
+        return "?"
+    return (words[0][0] + (words[-1][0] if len(words) > 1 else "")).upper()
+
+
 def settings_workspace() -> dict[str, Any]:
     settings = settings_repository.get_app_settings()
     theme = (settings_repository.get_setting("app_theme") or "light").strip().casefold()
@@ -1603,6 +1611,14 @@ def settings_workspace() -> dict[str, Any]:
         )
     )
     payload = {
+        "profile": {
+            "display_name": (settings_repository.get_setting("profile_display_name") or "River Young").strip(),
+            "role": (settings_repository.get_setting("profile_role") or "Owner").strip(),
+            "email": (settings_repository.get_setting("profile_email") or "").strip(),
+            "initials": _profile_initials(settings_repository.get_setting("profile_display_name") or "River Young"),
+            "avatar_configured": bool(settings_repository.get_setting("profile_avatar_path")),
+            "avatar_available": bool(_resolve_dashboard_logo(settings_repository.get_setting("profile_avatar_path"))),
+        },
         "business": {
             "name": settings.business_name,
             "home_location": home_location,
@@ -1715,6 +1731,21 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
             "dashboard_home_city": str(values.get("home_city", "")).strip()[:100],
             "dashboard_home_state": str(values.get("home_state", "")).strip().upper()[:2],
             "dashboard_show_business_name": "1" if _setting_bool(values.get("show_name_on_dashboard", True), "show_name_on_dashboard") else "0",
+        }
+    elif section == "profile":
+        display_name = str(values.get("display_name", "")).strip()
+        role = str(values.get("role", "")).strip()
+        email = str(values.get("email", "")).strip()
+        if not display_name:
+            raise BridgeError("validation_failed", "Display name is required.", HTTPStatus.BAD_REQUEST, {"display_name": "required"})
+        if not role:
+            raise BridgeError("validation_failed", "Role is required.", HTTPStatus.BAD_REQUEST, {"role": "required"})
+        if email and ("@" not in email or " " in email):
+            raise BridgeError("validation_failed", "Enter a valid email address.", HTTPStatus.BAD_REQUEST, {"email": "invalid_email"})
+        updates = {
+            "profile_display_name": display_name[:160],
+            "profile_role": role[:100],
+            "profile_email": email[:254],
         }
     elif section == "orders":
         number_format = str(values.get("number_format", "")).strip()
@@ -1911,6 +1942,79 @@ def download_dashboard_logo() -> BinaryDownload:
     path = _resolve_dashboard_logo(settings_repository.get_app_settings().dashboard_logo_path)
     if path is None:
         raise BridgeError("file_missing", "The business logo could not be found.", HTTPStatus.NOT_FOUND)
+    return BinaryDownload(path.name, mimetypes.guess_type(path.name)[0] or "application/octet-stream", path.read_bytes())
+
+
+def _decode_profile_avatar(payload: dict[str, Any]) -> tuple[bytes, str]:
+    upload = payload.get("file")
+    if not isinstance(upload, dict):
+        raise BridgeError("validation_failed", "Choose a profile photo.", HTTPStatus.BAD_REQUEST, {"file": "required"})
+    try:
+        content = base64.b64decode(str(upload.get("content_base64", "")), validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise BridgeError("validation_failed", "The profile photo could not be read.", HTTPStatus.BAD_REQUEST, {"file": "invalid_content"}) from exc
+    if not content:
+        raise BridgeError("validation_failed", "The profile photo is empty.", HTTPStatus.BAD_REQUEST, {"file": "empty"})
+    if len(content) > MAX_PROFILE_AVATAR_BYTES:
+        raise BridgeError("validation_failed", "Profile photos must be 5 MB or smaller.", HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"file": "too_large"})
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return content, ".png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return content, ".jpg"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return content, ".gif"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return content, ".webp"
+    raise BridgeError("validation_failed", "Use a PNG, JPEG, GIF, or WebP profile photo.", HTTPStatus.BAD_REQUEST, {"file": "unsupported_type"})
+
+
+def _delete_managed_profile_avatar(path_value: str) -> None:
+    path = _resolve_dashboard_logo(path_value)
+    if path is None:
+        return
+    managed_root = (get_storage_root() / "media" / "profiles").resolve()
+    try:
+        path.relative_to(managed_root)
+    except ValueError:
+        return
+    path.unlink(missing_ok=True)
+
+
+def save_profile_avatar(payload: dict[str, Any]) -> dict[str, Any]:
+    current = settings_workspace()
+    expected_revision = str(payload.get("expected_revision", "")).strip()
+    if expected_revision and expected_revision != current["summary"]["revision"]:
+        raise BridgeError("settings_conflict", "Settings changed in another window. Refresh and try again.", HTTPStatus.CONFLICT)
+    content, suffix = _decode_profile_avatar(payload)
+    with MUTATION_LOCK:
+        previous = settings_repository.get_setting("profile_avatar_path")
+        folder = get_storage_root() / "media" / "profiles"
+        folder.mkdir(parents=True, exist_ok=True)
+        destination = folder / f"owner_{hashlib.sha256(content).hexdigest()[:16]}{suffix}"
+        destination.write_bytes(content)
+        relative = str(destination.relative_to(get_storage_root()))
+        settings_repository.set_setting("profile_avatar_path", relative)
+        if previous != relative:
+            _delete_managed_profile_avatar(previous)
+    return settings_workspace()
+
+
+def delete_profile_avatar(payload: dict[str, Any]) -> dict[str, Any]:
+    current = settings_workspace()
+    expected_revision = str(payload.get("expected_revision", "")).strip()
+    if expected_revision and expected_revision != current["summary"]["revision"]:
+        raise BridgeError("settings_conflict", "Settings changed in another window. Refresh and try again.", HTTPStatus.CONFLICT)
+    with MUTATION_LOCK:
+        previous = settings_repository.get_setting("profile_avatar_path")
+        settings_repository.set_setting("profile_avatar_path", "")
+        _delete_managed_profile_avatar(previous)
+    return settings_workspace()
+
+
+def download_profile_avatar() -> BinaryDownload:
+    path = _resolve_dashboard_logo(settings_repository.get_setting("profile_avatar_path"))
+    if path is None:
+        raise BridgeError("file_missing", "The profile photo could not be found.", HTTPStatus.NOT_FOUND)
     return BinaryDownload(path.name, mimetypes.guess_type(path.name)[0] or "application/octet-stream", path.read_bytes())
 
 
@@ -3411,6 +3515,12 @@ class BridgeApplication:
             return HTTPStatus.OK, save_dashboard_logo(body or {})
         if method == "DELETE" and path == "/api/settings/logo":
             return HTTPStatus.OK, delete_dashboard_logo(body or {})
+        if method == "GET" and path == "/api/settings/profile/avatar":
+            return HTTPStatus.OK, download_profile_avatar()
+        if method == "POST" and path == "/api/settings/profile/avatar":
+            return HTTPStatus.OK, save_profile_avatar(body or {})
+        if method == "DELETE" and path == "/api/settings/profile/avatar":
+            return HTTPStatus.OK, delete_profile_avatar(body or {})
         if method == "GET" and path == "/api/sync-settings":
             return HTTPStatus.OK, cloud_sync_workspace()
         if method == "PUT" and path == "/api/sync-settings":

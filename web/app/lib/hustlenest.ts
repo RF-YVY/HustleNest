@@ -332,6 +332,7 @@ export type DocumentsWorkspaceData = {
 };
 
 export type SettingsWorkspaceData = {
+  profile: { display_name: string; role: string; email: string; initials: string; avatar_configured: boolean; avatar_available: boolean };
   business: { name: string; home_location: string; show_name_on_dashboard: boolean; logo_configured: boolean; logo_available: boolean; logo_alignment: string; logo_size: number };
   appearance: { theme: "light" | "dark" | "minty" | "solar" | "mission-control" | "terminal-green"; logo_alignment: "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right"; logo_size: number; dashboard_sections: Array<{ key: string; label: string; visible: boolean; collapsed: boolean }> };
   orders: { number_format: string; next_sequence: number; next_number: string; low_inventory_threshold: number };

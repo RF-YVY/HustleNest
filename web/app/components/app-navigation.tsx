@@ -38,6 +38,10 @@ export function AppNavigation({
   showBusinessName,
   logoAvailable,
   brandingRevision,
+  profileName,
+  profileRole,
+  profileInitials,
+  profileAvatarAvailable,
 }: {
   activeView: WorkspaceView;
   onNavigate: (view: WorkspaceView) => void;
@@ -51,6 +55,10 @@ export function AppNavigation({
   showBusinessName?: boolean;
   logoAvailable?: boolean;
   brandingRevision?: string;
+  profileName?: string;
+  profileRole?: string;
+  profileInitials?: string;
+  profileAvatarAvailable?: boolean;
 }) {
   const groups: Array<{ label: string; items: NavigationItem[] }> = [
     {
@@ -113,11 +121,11 @@ export function AppNavigation({
       </nav>
       <div className="sidebar-footer">
         <button className={activeView === "settings" ? "nav-item active" : "nav-item"} onClick={() => onNavigate("settings")} aria-current={activeView === "settings" ? "page" : undefined}><Settings size={18} /><span>Settings</span></button>
-        <div className="profile">
-          <div className="avatar avatar-owner">RY</div>
-          <div><strong>River Young</strong><span>Owner</span></div>
+        <button className="profile profile-button" onClick={() => onNavigate("settings")} aria-label="Edit owner profile">
+          <div className={`avatar avatar-owner${profileAvatarAvailable ? " has-photo" : ""}`}>{profileAvatarAvailable ? <img src={`${bridgeUrl}/api/settings/profile/avatar?v=${brandingRevision ?? "current"}`} alt="" /> : profileInitials || "?"}</div>
+          <div><strong>{profileName || "Owner"}</strong><span>{profileRole || "Owner"}</span></div>
           <MoreHorizontal size={18} />
-        </div>
+        </button>
       </div>
     </aside>
   );

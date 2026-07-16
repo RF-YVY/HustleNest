@@ -886,6 +886,49 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertFalse(cleared["business"]["logo_configured"])
         self.assertFalse((Path(self.storage.name) / "HustleNest" / saved_path).exists())
 
+    def test_browser_saves_owner_profile_and_managed_avatar(self) -> None:
+        _, initial = self.application.dispatch("GET", "/api/settings")
+        self.assertEqual(initial["profile"]["display_name"], "River Young")
+        self.assertEqual(initial["profile"]["initials"], "RY")
+
+        status, updated = self.application.dispatch(
+            "PUT",
+            "/api/settings",
+            {
+                "section": "profile",
+                "expected_revision": initial["summary"]["revision"],
+                "values": {"display_name": "Jordan Avery", "role": "Studio Owner", "email": "jordan@example.com"},
+            },
+        )
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(updated["profile"]["display_name"], "Jordan Avery")
+        self.assertEqual(updated["profile"]["role"], "Studio Owner")
+        self.assertEqual(updated["profile"]["email"], "jordan@example.com")
+        self.assertEqual(updated["profile"]["initials"], "JA")
+
+        image = b"\x89PNG\r\n\x1a\nmanaged-profile-avatar"
+        avatar_status, pictured = self.application.dispatch(
+            "POST",
+            "/api/settings/profile/avatar",
+            {"expected_revision": updated["summary"]["revision"], "file": {"name": "owner.png", "content_base64": base64.b64encode(image).decode("ascii")}},
+        )
+        self.assertEqual(avatar_status, HTTPStatus.OK)
+        self.assertTrue(pictured["profile"]["avatar_available"])
+        saved_path = settings_repository.get_setting("profile_avatar_path")
+        self.assertFalse(Path(saved_path).is_absolute())
+        download_status, download = self.application.dispatch("GET", "/api/settings/profile/avatar")
+        self.assertEqual(download_status, HTTPStatus.OK)
+        self.assertEqual(download.content, image)
+
+        delete_status, cleared = self.application.dispatch(
+            "DELETE",
+            "/api/settings/profile/avatar",
+            {"expected_revision": pictured["summary"]["revision"]},
+        )
+        self.assertEqual(delete_status, HTTPStatus.OK)
+        self.assertFalse(cleared["profile"]["avatar_configured"])
+        self.assertFalse((Path(self.storage.name) / "HustleNest" / saved_path).exists())
+
     def test_browser_updates_masked_payment_methods_without_exposing_values(self) -> None:
         settings_repository.set_settings({
             "payment_options": '[{"label":"ACH","value":"secret-routing"}]',

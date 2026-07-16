@@ -25,6 +25,7 @@ import { BackupSettingsCard } from "./backup-settings-card";
 import { ImportSettingsCard } from "./import-settings-card";
 import { AppearanceSettingsCard } from "./appearance-settings-card";
 import { CloudSyncSettingsCard } from "./cloud-sync-settings-card";
+import { OwnerProfileSettingsCard } from "./owner-profile-settings-card";
 
 type EditableSection = "business" | "orders" | "invoice" | "tax" | "payments" | "browser";
 type PaymentDraft = { source_index: number | null; label: string; replacement: string };
@@ -91,6 +92,7 @@ export function SettingsWorkspace({ initialSettings, onSettingsUpdated }: { init
         <article><Globe2 size={19} /><div><span>Browser launch</span><strong>{settings?.browser.launch_mode === "none" ? "Manual" : settings?.browser.launch_mode === "specific" ? settings.browser.available.find((item) => item.id === settings.browser.browser_id)?.label || "Selected" : "System default"}</strong></div></article>
       </section>
       <section className="settings-grid">
+        {settings ? <OwnerProfileSettingsCard settings={settings} onUpdated={(updated) => onSettingsUpdated?.(updated)} /> : null}
         <BackupSettingsCard />
         <ImportSettingsCard />
         {settings ? <AppearanceSettingsCard settings={settings} onUpdated={(updated) => onSettingsUpdated?.(updated)} /> : null}
