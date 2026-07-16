@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run HustleNest",
+			"type": "shell",
+			"command": "py",
+			"args": [
+				"-3",
+				"-m",
+				"hustlenest.main"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

@@ -1,14 +1,28 @@
-# Generated build artifacts
+.venv/
+.vscode/*
+!.vscode/tasks.json
+__pycache__/
+*.py[cod]
+*.pyo
+
 build/
 dist/
+BACKUP/
+*.db
+*.sqlite
+*.sqlite3
 
-# Virtual environments
-.venv/
+.pytest_cache/
+.coverage
+htmlcov/
 
-# PyInstaller spec files
-*.spec
+*.env
+*.pem
+*.key
+*.pfx
+*token*.json
+*credentials*.json
 
-# Bytecode cache
-__pycache__/
-*.pyc
-*.pyo
+*.egg-info/
+.mypy_cache/
+.ruff_cache/

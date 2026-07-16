@@ -41,7 +41,7 @@ Windows 10 or later with Python 3.11 is required.
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python -m cyberlablog.main
+python -m hustlenest.main
 ```
 
 On first run a database file appears at `%LOCALAPPDATA%\HustleNest\hustlenest.db`. Deleting that file resets all application data.
@@ -49,9 +49,125 @@ On first run a database file appears at `%LOCALAPPDATA%\HustleNest\hustlenest.db
 ## Running the App
 
 - Installer build: launch HustleNest from Start > HustleNest > HustleNest.
-- Source build: run `python -m cyberlablog.main` from an activated virtual environment.
+- Source build: run `python -m hustlenest.main` from an activated virtual environment.
 
 Invoices export as PDFs through the Invoice Manager dialog, which launches when you select an order and choose **Export Invoice**.
+
+## Running Tests
+
+Run the repository regression tests with Python's standard test runner:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+The planned workflow and browser-UI migration are documented in
+[`docs/UX_MIGRATION_BLUEPRINT.md`](docs/UX_MIGRATION_BLUEPRINT.md). The completed
+desktop-to-browser mapping and safe retirement checklist are in
+[`docs/BROWSER_PARITY_AND_RETIREMENT.md`](docs/BROWSER_PARITY_AND_RETIREMENT.md).
+
+The browser Orders workspace lives in [`web/`](web/). Phase 3 connects its
+list, detail, metrics, status advancement, customer/product lookup, and complete
+order creation/editing workflow to the existing local SQLite repositories.
+Orders can also be marked paid or unpaid, cancelled with inventory restoration,
+and downloaded as branded PDF invoices or receipts directly from the browser
+through `python -m hustlenest.web_bridge`. When that
+local bridge is unavailable or the database is empty, the UI clearly falls
+back to sample data for workflow review. The integration boundary is documented in
+[`docs/ORDERS_BRIDGE_CONTRACT.md`](docs/ORDERS_BRIDGE_CONTRACT.md).
+
+The first Phase 4 module workspaces add connected Customers and Products
+list/detail views. Related orders open directly in the Orders workspace, and a
+customer or product can seed a new order without re-entering its context.
+Customer details also support interaction logging, related-order context, and
+next-follow-up scheduling directly from the browser.
+Customer results merge CRM contacts with distinct names found in historical
+orders, ensuring order-only customers remain visible. An order-only customer can
+be promoted into an editable CRM contact directly from the detail view. The connected Materials
+workspace adds stock thresholds, inventory value, vendors, and recent material
+transactions. Materials can be received, consumed, or corrected from a physical
+count in the browser while preserving an auditable inventory history.
+The Vendors workspace completes that supply chain view with contact and account
+details, linked-material value, reorder exposure, and direct material navigation.
+The Finance workspace adds a connected review surface for recorded expenses,
+year-to-date category trends, upcoming recurring obligations, and operational
+losses linked back to products, materials, and orders.
+The Reports workspace combines sales, line-item costs, expenses, losses,
+fulfillment, products, and customers into period-based operating insights.
+History adds a searchable, date-filtered audit trail for order changes,
+payments, status updates, and financial deltas, with CSV export and direct
+navigation back to available orders. The same timeline appears inside each
+order detail view.
+Sales Geography replaces the desktop map with an offline-friendly state tile
+map, home-base context, destination rankings, city search, and direct links to
+the orders behind each market—without requiring external map or geocoding services.
+Home now acts as a connected command center for attention items, cash outlook,
+sales momentum, goals, recent orders, and direct workflow shortcuts.
+Goals can be created and edited from Home with automatic business metrics or
+manual progress, dated checkpoints, thresholds, ownership, and stale-edit
+protection. Obsolete goals can also be removed without returning to the desktop UI.
+The Documents workspace organizes local file records by category, tags, and
+the orders, customers, products, materials, or vendors they support.
+Files can now be uploaded into HustleNest-managed local storage, downloaded,
+relinked, retagged, and removed from the browser. Removing an external file
+record never deletes the source file; managed uploads offer an explicit choice.
+Settings provides privacy-safe browser editing for business, order, invoice,
+tax, inventory, invoice payment methods, and launch preferences with validation
+and conflict protection. Existing payment destinations remain masked and can
+be retained, replaced, added, or removed without being returned to the browser.
+Cloud credentials and provider values remain protected. Start the bridge with
+`--launch-browser` to honor the saved choice
+of system default, a selected installed work browser, or manual opening.
+For a single source command after `npm run build`, use
+`python -m hustlenest.browser_app`; it starts the production browser server and
+Python backend together and applies the same saved browser choice.
+Cloud sync can now be fully configured in Browser Settings for local folders,
+Google Drive, Dropbox, OneDrive, or SFTP. Saved values never return to the
+browser; each field can be kept, replaced, or removed. Manual uploads use a
+consistent SQLite snapshot. Pulls require typed confirmation, create a local
+safety backup, validate the downloaded database, and request a restart only
+when local data was actually replaced.
+The global Quick Add panel creates customers, products, materials, vendors,
+expenses, recurring expenses, and losses from any browser workspace, then
+refreshes and opens the affected module. Finance can also revise recurring
+schedules with conflict protection. Orders retain their more detailed dedicated
+composer.
+The header search now finds records across sales, inventory, finance, and
+documents, and opens the selected record directly. Use `Ctrl+K` to focus it
+from anywhere in the browser workspace.
+Customers, products, materials, and vendors can also be edited from their
+browser detail views. Updates retain advanced fields managed elsewhere and use
+revision checks to prevent stale forms from overwriting newer changes.
+Product editing now includes lifecycle status and itemized extra unit costs;
+the Products workspace shows total-cost composition, margin, sales velocity,
+and projected stockout timing from the existing inventory forecast service.
+PNG, JPEG, GIF, and WebP product photos can be uploaded, previewed, replaced,
+or removed in the browser. Images are validated by file signature, limited to
+8 MB, and copied into HustleNest-managed local media storage.
+Recorded expenses and operational losses can be corrected from Finance with the
+same safeguards while retaining tags and linked business-record context.
+Browser Settings now includes local database backup configuration, automatic
+daily or weekly snapshots while the backend is running, retention limits,
+manual backup/download, and guarded restore. Restores validate SQLite health,
+create a safety snapshot, and require the full backup filename to be typed.
+The browser can also preview and import CSV or XLSX files for products, orders,
+and customers. Column mapping is editable before saving, required fields are
+checked, duplicates can be skipped or updated, and unmapped existing data is
+preserved during updates. The desktop wizard remains available as a fallback.
+Appearance settings now persist light or dark mode across browser sessions and
+support managed business-logo upload, replacement, and removal. The selected
+business identity appears in browser navigation, while the desktop dashboard's
+section visibility and collapsed-state preferences remain browser-editable
+during the parity-verification period.
+Orders and products can now be moved to trash from their browser detail views.
+The Recently Deleted workspace supports search, filtering, restoration, guarded
+permanent deletion, and typed confirmation before emptying all trash. Order
+deletion remains separate from cancellation so inventory changes are explicit.
+Reports now download order-detail CSV, tax CSV/PDF, and sales, inventory,
+profit-and-loss, customer, and comparison PDFs for the selected period. Browser
+editors provide confirmed, revision-guarded deletion for customers, materials,
+vendors, expenses, recurring expenses, losses, and CRM interactions. Settings
+also includes application version, source, and release links.
 
 ## Cloud Sync (Optional)
 
@@ -81,7 +197,7 @@ The PyInstaller step emits the executable in `dist\HustleNest\HustleNest.exe`. T
 
 ```
 .github/
-cyberlablog/
+hustlenest/
    __init__.py
    main.py                # PySide6 application entry point
    resources.py           # Resource lookup helpers
