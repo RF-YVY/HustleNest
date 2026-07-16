@@ -1139,6 +1139,18 @@ button { color: inherit; }
 .geography-card-heading h2, .destination-hero h2 { margin: 4px 0 0; font-size: 0.75rem; }
 .geography-card-heading > small { color: var(--muted); font-size: 0.4375rem; }
 .geography-card-heading > em { min-width: 25px; padding: 4px 6px; border-radius: 8px; color: var(--teal); background: var(--teal-soft); font-size: 0.4375rem; font-style: normal; font-weight: 800; text-align: center; }
+.map-view-toggle { display: flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--canvas); }
+.map-view-toggle button { min-height: 28px; display: flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font: inherit; font-size: 0.4375rem; font-weight: 750; cursor: pointer; }
+.map-view-toggle button:hover { color: var(--ink); }
+.map-view-toggle button.active { color: var(--teal-contrast); background: var(--teal); box-shadow: 0 3px 10px color-mix(in srgb, var(--teal) 24%, transparent); }
+.destination-map { position: relative; min-height: 362px; margin: 0 18px 17px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--canvas); }
+.destination-map iframe { width: 100%; height: 362px; display: block; border: 0; filter: saturate(.86) contrast(.98); }
+.destination-map-caption { position: absolute; left: 12px; right: 12px; bottom: 12px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid rgba(255,255,255,.72); border-radius: 10px; color: #17243d; background: rgba(255,255,255,.9); box-shadow: 0 8px 24px rgba(24,45,77,.18); backdrop-filter: blur(14px); }
+.destination-map-caption > svg { color: var(--teal); }
+.destination-map-caption span, .destination-map-caption small, .destination-map-caption strong { display: block; }
+.destination-map-caption small { color: #63718a; font-size: 0.375rem; text-transform: uppercase; }
+.destination-map-caption strong { margin-top: 2px; font-size: 0.5rem; }
+.destination-map-caption em { padding: 4px 6px; border-radius: 6px; color: #4c607b; background: rgba(218,228,242,.82); font-size: 0.375rem; font-style: normal; font-weight: 750; }
 .state-map-scroll { padding: 7px 18px 13px; overflow-x: auto; }
 .state-tile-map { min-width: 650px; display: grid; grid-template-columns: repeat(13, 42px); grid-template-rows: repeat(7, 42px); gap: 5px; justify-content: center; }
 .state-tile-map button { position: relative; display: grid; place-content: center; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--canvas); cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
@@ -1187,6 +1199,8 @@ button { color: inherit; }
 @media (max-width: 900px) {
   .geography-layout { grid-template-columns: 1fr; }
   .destination-detail-card { grid-column: auto; }
+  .geography-card-heading { align-items: stretch; flex-direction: column; }
+  .map-view-toggle { align-self: flex-start; }
 }
 .follow-up-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
 .follow-up-fields > div { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; color: var(--amber); }
