@@ -337,6 +337,11 @@ export default function HustleNestWorkspace() {
   }, [reloadKey]);
 
   useEffect(() => {
+    document.documentElement.style.fontSize = `${(settings?.appearance.text_scale ?? 1) * 100}%`;
+    return () => document.documentElement.style.removeProperty("font-size");
+  }, [settings?.appearance.text_scale]);
+
+  useEffect(() => {
     if (bridgeState !== "connected") return;
     const controller = new AbortController();
     fetch(`${bridgeUrl}/api/orders/${selectedId}`, { signal: controller.signal })

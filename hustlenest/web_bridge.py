@@ -55,6 +55,7 @@ DASHBOARD_SECTIONS = {
     "completed_orders": "Completed orders",
 }
 APPEARANCE_THEMES = {"light", "dark", "minty", "solar", "mission-control", "glass"}
+APPEARANCE_TEXT_SCALES = {1.0, 1.1, 1.25, 1.4}
 CLOUD_SYNC_PROVIDERS = {
     "local-folder": {"label": "Local folder (sync client)", "fields": (("directory", "Directory", True, False, ""), ("file_name", "Remote file name", False, False, "hustlenest.db"))},
     "google-drive": {"label": "Personal Google Drive", "fields": (("token_path", "Token JSON path", True, True, ""), ("client_secrets_path", "Client secrets path", False, True, ""), ("folder_id", "Folder ID", False, False, "root"), ("file_name", "Remote file name", False, False, "hustlenest.db"))},
@@ -1585,6 +1586,12 @@ def settings_workspace() -> dict[str, Any]:
         theme = "glass"
     if theme not in APPEARANCE_THEMES:
         theme = "light"
+    try:
+        text_scale = float(settings_repository.get_setting("browser_text_scale") or "1")
+    except (TypeError, ValueError):
+        text_scale = 1.0
+    if not isfinite(text_scale) or text_scale not in APPEARANCE_TEXT_SCALES:
+        text_scale = 1.0
     address = ", ".join(
         part
         for part in (
@@ -1632,6 +1639,7 @@ def settings_workspace() -> dict[str, Any]:
         },
         "appearance": {
             "theme": theme,
+            "text_scale": text_scale,
             "logo_alignment": settings.dashboard_logo_alignment,
             "logo_size": settings.dashboard_logo_size,
             "dashboard_sections": _dashboard_section_settings(),
@@ -1839,6 +1847,12 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
         theme = str(values.get("theme", current_appearance["theme"])).strip().casefold()
         if theme not in APPEARANCE_THEMES:
             raise BridgeError("validation_failed", "Choose an available color theme.", HTTPStatus.BAD_REQUEST, {"theme": "invalid_choice"})
+        try:
+            text_scale = float(values.get("text_scale", current_appearance["text_scale"]))
+        except (TypeError, ValueError):
+            text_scale = 0.0
+        if not isfinite(text_scale) or text_scale not in APPEARANCE_TEXT_SCALES:
+            raise BridgeError("validation_failed", "Choose an available text size.", HTTPStatus.BAD_REQUEST, {"text_scale": "invalid_choice"})
         alignment = str(values.get("logo_alignment", current_appearance["logo_alignment"])).strip().casefold()
         if alignment not in {"top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"}:
             raise BridgeError("validation_failed", "Logo alignment is invalid.", HTTPStatus.BAD_REQUEST, {"logo_alignment": "invalid_choice"})
@@ -1856,6 +1870,7 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
         }
         updates = {
             "app_theme": theme,
+            "browser_text_scale": f"{text_scale:g}",
             "dashboard_logo_alignment": alignment,
             "dashboard_logo_size": str(logo_size),
             "dashboard_sections_json": json.dumps(sections, separators=(",", ":")),

@@ -15,6 +15,7 @@ _DEFAULTS: Dict[str, str] = {
     "dashboard_logo_path": "",
     "dashboard_logo_alignment": "top-left",
     "dashboard_logo_size": "160",
+    "browser_text_scale": "1",
     "dashboard_home_city": "",
     "dashboard_home_state": "",
     "tax_rate_percent": "0",

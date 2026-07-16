@@ -858,13 +858,23 @@ class OrdersBridgeTests(unittest.TestCase):
             {
                 "section": "appearance",
                 "expected_revision": initial["summary"]["revision"],
-                "values": {"theme": "mission-control", "logo_alignment": "bottom-right", "logo_size": 240, "dashboard_sections": sections},
+                "values": {"theme": "mission-control", "text_scale": 1.25, "logo_alignment": "bottom-right", "logo_size": 240, "dashboard_sections": sections},
             },
         )
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(updated["appearance"]["theme"], "mission-control")
+        self.assertEqual(updated["appearance"]["text_scale"], 1.25)
+        self.assertEqual(settings_repository.get_setting("browser_text_scale"), "1.25")
         self.assertEqual(updated["appearance"]["logo_alignment"], "bottom-right")
         self.assertFalse(next(item for item in updated["appearance"]["dashboard_sections"] if item["key"] == "notifications")["visible"])
+
+        with self.assertRaises(BridgeError) as invalid_text_size:
+            self.application.dispatch(
+                "PUT",
+                "/api/settings",
+                {"section": "appearance", "expected_revision": updated["summary"]["revision"], "values": {"text_scale": 2}},
+            )
+        self.assertEqual(invalid_text_size.exception.fields["text_scale"], "invalid_choice")
 
         image = b"\x89PNG\r\n\x1a\nmanaged-brand-logo"
         logo_status, branded = self.application.dispatch(
