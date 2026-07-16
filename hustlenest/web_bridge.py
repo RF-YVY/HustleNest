@@ -54,6 +54,7 @@ DASHBOARD_SECTIONS = {
     "outstanding_orders": "Outstanding orders",
     "completed_orders": "Completed orders",
 }
+APPEARANCE_THEMES = {"light", "dark", "minty", "solar", "mission-control", "terminal-green"}
 CLOUD_SYNC_PROVIDERS = {
     "local-folder": {"label": "Local folder (sync client)", "fields": (("directory", "Directory", True, False, ""), ("file_name", "Remote file name", False, False, "hustlenest.db"))},
     "google-drive": {"label": "Personal Google Drive", "fields": (("token_path", "Token JSON path", True, True, ""), ("client_secrets_path", "Client secrets path", False, True, ""), ("folder_id", "Folder ID", False, False, "root"), ("file_name", "Remote file name", False, False, "hustlenest.db"))},
@@ -1572,7 +1573,7 @@ def _resolve_dashboard_logo(path_value: str) -> Optional[Path]:
 def settings_workspace() -> dict[str, Any]:
     settings = settings_repository.get_app_settings()
     theme = (settings_repository.get_setting("app_theme") or "light").strip().casefold()
-    if theme not in {"light", "dark"}:
+    if theme not in APPEARANCE_THEMES:
         theme = "light"
     address = ", ".join(
         part
@@ -1803,8 +1804,8 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
     elif section == "appearance":
         current_appearance = current["appearance"]
         theme = str(values.get("theme", current_appearance["theme"])).strip().casefold()
-        if theme not in {"light", "dark"}:
-            raise BridgeError("validation_failed", "Choose light or dark mode.", HTTPStatus.BAD_REQUEST, {"theme": "invalid_choice"})
+        if theme not in APPEARANCE_THEMES:
+            raise BridgeError("validation_failed", "Choose an available color theme.", HTTPStatus.BAD_REQUEST, {"theme": "invalid_choice"})
         alignment = str(values.get("logo_alignment", current_appearance["logo_alignment"])).strip().casefold()
         if alignment not in {"top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"}:
             raise BridgeError("validation_failed", "Logo alignment is invalid.", HTTPStatus.BAD_REQUEST, {"logo_alignment": "invalid_choice"})

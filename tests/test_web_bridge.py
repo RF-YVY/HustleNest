@@ -858,11 +858,11 @@ class OrdersBridgeTests(unittest.TestCase):
             {
                 "section": "appearance",
                 "expected_revision": initial["summary"]["revision"],
-                "values": {"theme": "dark", "logo_alignment": "bottom-right", "logo_size": 240, "dashboard_sections": sections},
+                "values": {"theme": "mission-control", "logo_alignment": "bottom-right", "logo_size": 240, "dashboard_sections": sections},
             },
         )
         self.assertEqual(status, HTTPStatus.OK)
-        self.assertEqual(updated["appearance"]["theme"], "dark")
+        self.assertEqual(updated["appearance"]["theme"], "mission-control")
         self.assertEqual(updated["appearance"]["logo_alignment"], "bottom-right")
         self.assertFalse(next(item for item in updated["appearance"]["dashboard_sections"] if item["key"] == "notifications")["visible"])
 

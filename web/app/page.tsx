@@ -264,7 +264,7 @@ export default function HustleNestWorkspace() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [seedCustomer, setSeedCustomer] = useState<CustomerOption | null>(null);
   const [seedProduct, setSeedProduct] = useState<ProductOption | null>(null);
-  const [darkMode, setDarkMode] = useState(false);
+  const [theme, setTheme] = useState<SettingsWorkspaceData["appearance"]["theme"]>("light");
   const [bridgeState, setBridgeState] = useState<BridgeState>("connecting");
   const [bridgeMessage, setBridgeMessage] = useState("Connecting to your HustleNest data…");
   const [metrics, setMetrics] = useState<OrderMetrics | null>(null);
@@ -315,7 +315,7 @@ export default function HustleNestWorkspace() {
         setHome(homePayload.data);
         setDocuments(documentsPayload.data);
         setSettings(settingsPayload.data);
-        setDarkMode(settingsPayload.data.appearance.theme === "dark");
+        setTheme(settingsPayload.data.appearance.theme);
         if (ordersPayload.data.length === 0) {
           setBridgeState("demo");
           setBridgeMessage("Your database has no orders yet. Showing sample data for workflow review.");
@@ -472,8 +472,8 @@ export default function HustleNestWorkspace() {
   const attentionCount = metrics?.needs_attention ?? orders.filter((order) => order.overdue).length;
 
   const toggleTheme = async () => {
-    const next = darkMode ? "light" : "dark";
-    setDarkMode(next === "dark");
+    const next = theme === "light" || theme === "minty" ? "dark" : "light";
+    setTheme(next);
     if (!settings) return;
     try {
       const response = await fetch(`${bridgeUrl}/api/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ section: "appearance", values: { theme: next }, expected_revision: settings.summary.revision }) });
@@ -674,7 +674,7 @@ export default function HustleNestWorkspace() {
   };
 
   return (
-    <main className={darkMode ? "app-shell dark" : "app-shell"}>
+    <main className={`app-shell theme-${theme} ${["dark", "solar", "mission-control", "terminal-green"].includes(theme) ? "dark" : ""}`}>
       <AppNavigation
         activeView={activeView}
         onNavigate={setActiveView}
@@ -699,7 +699,7 @@ export default function HustleNestWorkspace() {
               {bridgeState === "connected" ? "Local data connected" : bridgeState === "connecting" ? "Connecting…" : "Demo data"}
             </span>
             <button className="icon-button" aria-label="Toggle theme" onClick={() => void toggleTheme()}>
-              {darkMode ? <Sun size={19} /> : <Moon size={19} />}
+              {["dark", "solar", "mission-control", "terminal-green"].includes(theme) ? <Sun size={19} /> : <Moon size={19} />}
             </button>
             <button className="icon-button notification-button" aria-label="Open priorities and notifications" onClick={() => setActiveView("home")}>
               <Bell size={19} />
@@ -937,7 +937,7 @@ export default function HustleNestWorkspace() {
         ) : activeView === "trash" ? (
           <TrashWorkspace key={`trash-${reloadKey}`} onChanged={(message) => { setBridgeMessage(message); setReloadKey((value) => value + 1); }} />
         ) : (
-          <SettingsWorkspace key={settings ? "connected-settings" : "loading-settings"} initialSettings={settings} onSettingsUpdated={(updated) => { setSettings(updated); setDarkMode(updated.appearance.theme === "dark"); }} />
+          <SettingsWorkspace key={settings ? "connected-settings" : "loading-settings"} initialSettings={settings} onSettingsUpdated={(updated) => { setSettings(updated); setTheme(updated.appearance.theme); }} />
         )}
       </section>
 
