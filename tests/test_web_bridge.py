@@ -929,6 +929,12 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertFalse(cleared["profile"]["avatar_configured"])
         self.assertFalse((Path(self.storage.name) / "HustleNest" / saved_path).exists())
 
+    def test_browser_maps_retired_terminal_theme_to_glass(self) -> None:
+        settings_repository.set_setting("app_theme", "terminal-green")
+        status, settings = self.application.dispatch("GET", "/api/settings")
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(settings["appearance"]["theme"], "glass")
+
     def test_browser_updates_masked_payment_methods_without_exposing_values(self) -> None:
         settings_repository.set_settings({
             "payment_options": '[{"label":"ACH","value":"secret-routing"}]',

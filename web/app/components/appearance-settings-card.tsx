@@ -14,7 +14,7 @@ const themes: Array<{ value: Theme; label: string; description: string }> = [
   { value: "minty", label: "Minty", description: "Fresh palette from CyberLabLog" },
   { value: "solar", label: "Solar", description: "Solarized palette from CyberLabLog" },
   { value: "mission-control", label: "Mission Control", description: "Orbital console from APRS-PropView" },
-  { value: "terminal-green", label: "Terminal Green", description: "Text-first console from APRS-PropView" },
+  { value: "glass", label: "Glass", description: "Frosted layers inspired by iOS and macOS" },
 ];
 
 const readFile = (file: File) => new Promise<{ name: string; content_base64: string }>((resolve, reject) => {

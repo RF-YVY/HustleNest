@@ -674,7 +674,7 @@ export default function HustleNestWorkspace() {
   };
 
   return (
-    <main className={`app-shell theme-${theme} ${["dark", "solar", "mission-control", "terminal-green"].includes(theme) ? "dark" : ""}`}>
+    <main className={`app-shell theme-${theme} ${["dark", "solar", "mission-control"].includes(theme) ? "dark" : ""}`}>
       <AppNavigation
         activeView={activeView}
         onNavigate={setActiveView}
@@ -703,7 +703,7 @@ export default function HustleNestWorkspace() {
               {bridgeState === "connected" ? "Local data connected" : bridgeState === "connecting" ? "Connecting…" : "Demo data"}
             </span>
             <button className="icon-button" aria-label="Toggle theme" onClick={() => void toggleTheme()}>
-              {["dark", "solar", "mission-control", "terminal-green"].includes(theme) ? <Sun size={19} /> : <Moon size={19} />}
+              {["dark", "solar", "mission-control"].includes(theme) ? <Sun size={19} /> : <Moon size={19} />}
             </button>
             <button className="icon-button notification-button" aria-label="Open priorities and notifications" onClick={() => setActiveView("home")}>
               <Bell size={19} />

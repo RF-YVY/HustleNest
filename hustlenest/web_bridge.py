@@ -54,7 +54,7 @@ DASHBOARD_SECTIONS = {
     "outstanding_orders": "Outstanding orders",
     "completed_orders": "Completed orders",
 }
-APPEARANCE_THEMES = {"light", "dark", "minty", "solar", "mission-control", "terminal-green"}
+APPEARANCE_THEMES = {"light", "dark", "minty", "solar", "mission-control", "glass"}
 CLOUD_SYNC_PROVIDERS = {
     "local-folder": {"label": "Local folder (sync client)", "fields": (("directory", "Directory", True, False, ""), ("file_name", "Remote file name", False, False, "hustlenest.db"))},
     "google-drive": {"label": "Personal Google Drive", "fields": (("token_path", "Token JSON path", True, True, ""), ("client_secrets_path", "Client secrets path", False, True, ""), ("folder_id", "Folder ID", False, False, "root"), ("file_name", "Remote file name", False, False, "hustlenest.db"))},
@@ -1581,6 +1581,8 @@ def _profile_initials(display_name: str) -> str:
 def settings_workspace() -> dict[str, Any]:
     settings = settings_repository.get_app_settings()
     theme = (settings_repository.get_setting("app_theme") or "light").strip().casefold()
+    if theme == "terminal-green":
+        theme = "glass"
     if theme not in APPEARANCE_THEMES:
         theme = "light"
     address = ", ".join(
