@@ -2,7 +2,7 @@
 
 import { Boxes, CircleAlert, Factory, Package, Plus, ReceiptText, Repeat2, Trash2, UserRound, X } from "lucide-react";
 import { FormEvent, useState } from "react";
-import { bridgeUrl, type VendorOption } from "../lib/hustlenest";
+import { bridgeUrl, type MaterialOption, type VendorOption } from "../lib/hustlenest";
 
 export type QuickAddType = "customer" | "product" | "material" | "vendor" | "expense" | "recurring" | "loss";
 export type EditableRecord = { id: number; type: "customer" | "product" | "material" | "vendor" | "expense" | "recurring" | "loss"; revision: string; values: Record<string, string> };
@@ -18,17 +18,18 @@ const choices = [
 ];
 
 const today = () => new Date().toLocaleDateString("en-CA");
+const materialUnits = ["each", "piece", "box", "pack", "case", "bag", "bottle", "can", "roll", "sheet", "foot", "yard", "meter", "inch", "ounce", "pound", "gram", "kilogram", "liter", "gallon", "set", "pair", "dozen"];
 
 function initialValues(type: QuickAddType): Record<string, string> {
   if (type === "recurring") return { category: "", amount: "", frequency: "monthly", start_date: today(), next_occurrence: today(), end_date: "", auto_record: "false", vendor_id: "", notes: "" };
-  if (type === "expense" || type === "loss") return { category: "", amount: "", date: today(), description: "", notes: "", vendor_id: "", payment_method: "" };
-  if (type === "product") return { sku: "", name: "", description: "", inventory_count: "0", unit_cost: "0", unit_price: "0", status: "Available", cost_components: "[]" };
+  if (type === "expense" || type === "loss") return { category: "", amount: "", date: today(), description: "", notes: "", vendor_id: "", material_id: "", payment_method: "" };
+  if (type === "product") return { sku: "", name: "", description: "", inventory_count: "0", unit_cost: "0", unit_price: "0", status: "Available", cost_components: "[]", materials: "[]" };
   if (type === "material") return { sku: "", name: "", category: "", unit_of_measure: "each", quantity_on_hand: "0", reorder_point: "0", cost_per_unit: "0", vendor_id: "", description: "", notes: "" };
   if (type === "vendor") return { name: "", contact_name: "", email: "", phone: "", website: "", account_number: "", preferred_payment_method: "", notes: "" };
   return { name: "", company: "", email: "", phone: "", address: "", notes: "" };
 }
 
-export function QuickAddPanel({ initialType = "customer", editRecord, vendors, onClose, onSaved, onDeleted }: { initialType?: QuickAddType; editRecord?: EditableRecord | null; vendors: VendorOption[]; onClose: () => void; onSaved: (type: QuickAddType, id: number, label: string) => void; onDeleted: (type: QuickAddType, id: number) => void }) {
+export function QuickAddPanel({ initialType = "customer", editRecord, vendors, materials, onClose, onSaved, onDeleted }: { initialType?: QuickAddType; editRecord?: EditableRecord | null; vendors: VendorOption[]; materials: MaterialOption[]; onClose: () => void; onSaved: (type: QuickAddType, id: number, label: string) => void; onDeleted: (type: QuickAddType, id: number) => void }) {
   const [type, setType] = useState<QuickAddType>(editRecord?.type ?? initialType);
   const [values, setValues] = useState<Record<string, string>>(() => ({ ...initialValues(editRecord?.type ?? initialType), ...(editRecord?.values ?? {}) }));
   const [saving, setSaving] = useState(false);
@@ -37,6 +38,8 @@ export function QuickAddPanel({ initialType = "customer", editRecord, vendors, o
   const set = (field: string, value: string) => setValues((current) => ({ ...current, [field]: value }));
   const costComponents = (() => { try { const parsed = JSON.parse(values.cost_components || "[]"); return Array.isArray(parsed) ? parsed as Array<{ label: string; amount: string }> : []; } catch { return []; } })();
   const setCostComponents = (components: Array<{ label: string; amount: string }>) => set("cost_components", JSON.stringify(components));
+  const productMaterials = (() => { try { const parsed = JSON.parse(values.materials || "[]"); return Array.isArray(parsed) ? parsed as Array<{ material_id: string | number; quantity_required: string | number; include_in_unit_cost?: boolean }> : []; } catch { return []; } })();
+  const setProductMaterials = (links: Array<{ material_id: string | number; quantity_required: string | number; include_in_unit_cost?: boolean }>) => set("materials", JSON.stringify(links));
   const switchType = (next: QuickAddType) => { setType(next); setValues(initialValues(next)); setError(""); };
 
   const submit = async (event: FormEvent) => {
@@ -90,11 +93,12 @@ export function QuickAddPanel({ initialType = "customer", editRecord, vendors, o
             <label><span>Description</span><textarea rows={2} value={values.description} onChange={(event) => set("description", event.target.value)} /></label>
             <div className="quick-form-triple"><label><span>Starting stock</span><input type="number" min="0" step="1" value={values.inventory_count} onChange={(event) => set("inventory_count", event.target.value)} /></label><label><span>Unit cost</span><input type="number" min="0" step="0.01" value={values.unit_cost} onChange={(event) => set("unit_cost", event.target.value)} /></label><label><span>Sale price</span><input type="number" min="0" step="0.01" value={values.unit_price} onChange={(event) => set("unit_price", event.target.value)} /></label></div>
             <label><span>Product status</span><select value={values.status} onChange={(event) => set("status", event.target.value)}><option>Ordered</option><option>Available</option><option>Out of Stock</option><option>Discontinued</option></select></label>
+            <fieldset className="product-material-editor"><legend>Materials used per product</legend>{productMaterials.map((link, index) => <div key={index}><select aria-label={`Material ${index + 1}`} value={link.material_id} onChange={(event) => setProductMaterials(productMaterials.map((item, row) => row === index ? { ...item, material_id: event.target.value } : item))} required><option value="">Choose material…</option>{materials.map((material) => <option value={material.id} disabled={productMaterials.some((item, row) => row !== index && Number(item.material_id) === material.id)} key={material.id}>{material.name} ({material.unit_of_measure || "unit"})</option>)}</select><input aria-label={`Material ${index + 1} quantity`} type="number" min="0.0001" step="0.01" value={link.quantity_required} onChange={(event) => setProductMaterials(productMaterials.map((item, row) => row === index ? { ...item, quantity_required: event.target.value } : item))} required /><select aria-label={`Material ${index + 1} cost treatment`} value={link.include_in_unit_cost === false ? "track" : "direct"} onChange={(event) => setProductMaterials(productMaterials.map((item, row) => row === index ? { ...item, include_in_unit_cost: event.target.value === "direct" } : item))}><option value="direct">Direct material</option><option value="track">Track only</option></select><button type="button" className="icon-button" aria-label={`Remove material ${index + 1}`} onClick={() => setProductMaterials(productMaterials.filter((_item, row) => row !== index))}><Trash2 size={15} /></button></div>)}<button type="button" className="secondary-button" onClick={() => setProductMaterials([...productMaterials, { material_id: "", quantity_required: "1", include_in_unit_cost: true }])} disabled={!materials.length || productMaterials.length >= Math.min(materials.length, 20)}><Plus size={14} /> Add material</button>{!materials.length ? <small>Add materials first, then link them here.</small> : <small>Direct material adds cost to future product totals and order profit snapshots. Track only records usage without affecting cost.</small>}</fieldset>
             <fieldset className="cost-component-editor"><legend>Extra unit costs</legend>{costComponents.map((component, index) => <div key={index}><input aria-label={`Cost ${index + 1} label`} placeholder="Packaging, labor…" value={component.label} onChange={(event) => setCostComponents(costComponents.map((item, row) => row === index ? { ...item, label: event.target.value } : item))} /><input aria-label={`Cost ${index + 1} amount`} type="number" min="0" step="0.01" placeholder="0.00" value={component.amount} onChange={(event) => setCostComponents(costComponents.map((item, row) => row === index ? { ...item, amount: event.target.value } : item))} /><button type="button" className="icon-button" aria-label={`Remove cost ${index + 1}`} onClick={() => setCostComponents(costComponents.filter((_item, row) => row !== index))}><Trash2 size={15} /></button></div>)}<button type="button" className="secondary-button" onClick={() => setCostComponents([...costComponents, { label: "", amount: "0" }])} disabled={costComponents.length >= 20}><Plus size={14} /> Add extra cost</button></fieldset>
           </> : null}
           {type === "material" ? <>
             <div className="quick-form-pair"><label><span>SKU *</span><input autoFocus value={values.sku} onChange={(event) => set("sku", event.target.value)} required /></label><label><span>Material name *</span><input value={values.name} onChange={(event) => set("name", event.target.value)} required /></label></div>
-            <div className="quick-form-pair"><label><span>Category</span><input value={values.category} onChange={(event) => set("category", event.target.value)} /></label><label><span>Unit</span><input value={values.unit_of_measure} onChange={(event) => set("unit_of_measure", event.target.value)} placeholder="each, ft, oz…" /></label></div>
+            <div className="quick-form-pair"><label><span>Category</span><input value={values.category} onChange={(event) => set("category", event.target.value)} /></label><label><span>Unit</span><select value={values.unit_of_measure} onChange={(event) => set("unit_of_measure", event.target.value)}>{values.unit_of_measure && !materialUnits.includes(values.unit_of_measure) ? <option value={values.unit_of_measure}>{values.unit_of_measure}</option> : null}{materialUnits.map((unit) => <option value={unit} key={unit}>{unit[0].toUpperCase() + unit.slice(1)}</option>)}</select></label></div>
             <div className="quick-form-triple"><label><span>On hand</span><input type="number" min="0" step="0.01" value={values.quantity_on_hand} onChange={(event) => set("quantity_on_hand", event.target.value)} /></label><label><span>Reorder at</span><input type="number" min="0" step="0.01" value={values.reorder_point} onChange={(event) => set("reorder_point", event.target.value)} /></label><label><span>Cost / unit</span><input type="number" min="0" step="0.01" value={values.cost_per_unit} onChange={(event) => set("cost_per_unit", event.target.value)} /></label></div>
             <VendorField vendors={vendors} value={values.vendor_id} onChange={(value) => set("vendor_id", value)} />
           </> : null}
@@ -117,7 +121,7 @@ export function QuickAddPanel({ initialType = "customer", editRecord, vendors, o
             <div className="quick-form-pair"><label><span>Category *</span><input autoFocus value={values.category} onChange={(event) => set("category", event.target.value)} required placeholder={type === "expense" ? "Supplies, shipping…" : "Damage, waste…"} /></label><label><span>Amount *</span><input type="number" min="0.01" step="0.01" value={values.amount} onChange={(event) => set("amount", event.target.value)} required /></label></div>
             <label><span>Date *</span><input type="date" value={values.date} onChange={(event) => set("date", event.target.value)} required /></label>
             <label><span>Description</span><input value={values.description} onChange={(event) => set("description", event.target.value)} /></label>
-            {type === "expense" ? <><VendorField vendors={vendors} value={values.vendor_id} onChange={(value) => set("vendor_id", value)} /><label><span>Payment method</span><input value={values.payment_method} onChange={(event) => set("payment_method", event.target.value)} /></label></> : null}
+            {type === "expense" ? <><VendorField vendors={vendors} value={values.vendor_id} onChange={(value) => set("vendor_id", value)} /><MaterialField materials={materials} value={values.material_id} onChange={(value) => set("material_id", value)} /><label><span>Payment method</span><input value={values.payment_method} onChange={(event) => set("payment_method", event.target.value)} /></label></> : null}
           </> : null}
           <label><span>Notes</span><textarea rows={3} value={values.notes ?? ""} onChange={(event) => set("notes", event.target.value)} /></label>
           {error ? <p className="quick-add-error" role="alert">{error}</p> : null}
@@ -130,4 +134,8 @@ export function QuickAddPanel({ initialType = "customer", editRecord, vendors, o
 
 function VendorField({ vendors, value, onChange }: { vendors: VendorOption[]; value: string; onChange: (value: string) => void }) {
   return <label><span>Vendor</span><select value={value} onChange={(event) => onChange(event.target.value)}><option value="">No vendor</option>{vendors.map((vendor) => <option value={vendor.id} key={vendor.id}>{vendor.name}</option>)}</select></label>;
+}
+
+function MaterialField({ materials, value, onChange }: { materials: MaterialOption[]; value: string; onChange: (value: string) => void }) {
+  return <label><span>Related material</span><select value={value} onChange={(event) => onChange(event.target.value)}><option value="">No material</option>{materials.map((material) => <option value={material.id} key={material.id}>{material.name} ({material.sku})</option>)}</select></label>;
 }

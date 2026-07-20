@@ -458,6 +458,7 @@ class Expense:
     description: str = ""
     payment_method: str = ""
     vendor_id: Optional[int] = None
+    material_id: Optional[int] = None
     is_recurring: bool = False
     recurring_id: Optional[int] = None
     document_id: Optional[int] = None

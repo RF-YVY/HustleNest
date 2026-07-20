@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.1] - 2026-07-20
+
+### Added
+- Product recipes that link one or more materials with the quantity required per finished product.
+- Per-material cost treatment: Direct material includes the link in costing, while Track only records usage without changing totals.
+- Optional material links on expenses with direct navigation between Finance and Materials.
+- Last-quarter and custom-date reporting windows, including matching report exports.
+
+### Changed
+- Product unit costs, new-order cost snapshots, margins, and inventory reports now include linked materials marked as Direct material.
+- Material units use a consistent dropdown while preserving existing custom unit values.
+- Browser catalog and order loading now support up to 2,000 records without the previous 100-product/order truncation.
+- Product details show material requirements, while material details show every linked product.
+
+### Fixed
+- Product edits and material-recipe replacements now commit atomically instead of allowing partial saves.
+- Cancelled orders remain visible in All Orders while staying excluded from active metrics and sales reports.
+- Report order drill-downs no longer stop after eight records.
+
 ## [4.0] - 2026-07-16
 
 ### Added

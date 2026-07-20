@@ -163,6 +163,38 @@ def _cost_components(values: dict[str, Any]) -> list[CostComponent]:
     return components
 
 
+def _product_material_links(values: dict[str, Any]) -> list[tuple[int, float, bool]]:
+    raw = values.get("materials", [])
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "[]")
+        except json.JSONDecodeError as exc:
+            raise BridgeError("validation_failed", "Product materials are invalid.", HTTPStatus.BAD_REQUEST, {"materials": "invalid"}) from exc
+    if not isinstance(raw, list) or len(raw) > 20:
+        raise BridgeError("validation_failed", "Use no more than 20 materials per product.", HTTPStatus.BAD_REQUEST, {"materials": "invalid"})
+    links: list[tuple[int, float, bool]] = []
+    seen: set[int] = set()
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise BridgeError("validation_failed", "A product material is invalid.", HTTPStatus.BAD_REQUEST, {f"materials.{index}": "invalid"})
+        try:
+            material_id = int(item.get("material_id"))
+            quantity = float(item.get("quantity_required"))
+        except (TypeError, ValueError) as exc:
+            raise BridgeError("validation_failed", "Choose a material and enter the quantity used.", HTTPStatus.BAD_REQUEST, {f"materials.{index}": "invalid"}) from exc
+        material = material_repository.get_material(material_id)
+        if material is None or material.archived:
+            raise BridgeError("validation_failed", "A selected material no longer exists.", HTTPStatus.BAD_REQUEST, {f"materials.{index}.material_id": "not_found"})
+        if quantity <= 0:
+            raise BridgeError("validation_failed", "Material quantity must be greater than zero.", HTTPStatus.BAD_REQUEST, {f"materials.{index}.quantity_required": "positive_required"})
+        if material_id in seen:
+            raise BridgeError("validation_failed", "Each material can only be added once.", HTTPStatus.BAD_REQUEST, {f"materials.{index}.material_id": "duplicate"})
+        seen.add(material_id)
+        include_in_unit_cost = _setting_bool(item.get("include_in_unit_cost", True), f"materials.{index}.include_in_unit_cost")
+        links.append((material_id, quantity, include_in_unit_cost))
+    return links
+
+
 def _product_status(values: dict[str, Any]) -> str:
     requested = str(values.get("status", "Available")).strip()
     match = next((item for item in order_service.list_product_statuses() if item.casefold() == requested.casefold()), None)
@@ -379,6 +411,12 @@ def promote_order_customer(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _product_dto(product: Any, forecast: Any = None) -> dict[str, Any]:
     photo = order_service.resolve_product_photo(product.photo_path)
+    material_links = product_repository.list_product_materials(product.id) if product.id is not None else []
+    material_unit_cost = sum(
+        float(item["cost_per_unit"]) * float(item["quantity_required"])
+        for item in material_links
+        if bool(item["include_in_unit_cost"])
+    )
     payload = {
         "id": product.id,
         "sku": product.sku,
@@ -388,9 +426,18 @@ def _product_dto(product: Any, forecast: Any = None) -> dict[str, Any]:
         "status": product.status,
         "unit_price": _money(product.default_unit_price),
         "base_unit_cost": _money(product.base_unit_cost),
-        "unit_cost": _money(product.total_unit_cost),
+        "unit_cost": _money(product.total_unit_cost + material_unit_cost),
+        "material_unit_cost": _money(material_unit_cost),
         "additional_unit_cost": _money(product.additional_unit_cost),
         "cost_components": [{"label": item.label, "amount": _money(item.amount)} for item in product.pricing_components],
+        "materials": [
+            {
+                **item,
+                "cost_per_unit": _money(item["cost_per_unit"]),
+                "cost_per_product": _money(float(item["cost_per_unit"]) * float(item["quantity_required"])),
+            }
+            for item in material_links
+        ],
         "photo_configured": bool(product.photo_path),
         "photo_available": bool(photo),
         "is_complete": bool(product.is_complete),
@@ -407,13 +454,13 @@ def _product_dto(product: Any, forecast: Any = None) -> dict[str, Any]:
 def search_products(query: str = "", limit: int = 30) -> list[dict[str, Any]]:
     term = query.strip().casefold()
     matches = []
-    forecasts = {item.product_id: item for item in order_service.list_inventory_forecast(limit=100) if item.product_id is not None}
+    forecasts = {item.product_id: item for item in order_service.list_inventory_forecast(limit=2000) if item.product_id is not None}
     for product in product_repository.list_products():
         searchable = " ".join((product.sku, product.name, product.description, product.status)).casefold()
         if term and term not in searchable:
             continue
         matches.append(_product_dto(product, forecasts.get(product.id)))
-        if len(matches) >= min(max(limit, 1), 100):
+        if len(matches) >= min(max(limit, 1), 2000):
             break
     return matches
 
@@ -559,6 +606,7 @@ def _expense_revision(expense: Any) -> str:
         "id": expense.id, "category": expense.category, "amount": _money(expense.amount),
         "expense_date": expense.expense_date.isoformat(), "description": expense.description,
         "payment_method": expense.payment_method, "vendor_id": expense.vendor_id,
+        "material_id": expense.material_id,
         "is_recurring": expense.is_recurring, "recurring_id": expense.recurring_id,
         "document_id": expense.document_id, "tags": expense.tags, "notes": expense.notes,
     })
@@ -592,6 +640,7 @@ def finance_workspace(limit: int = 200) -> dict[str, Any]:
     year_start = today.replace(month=1, day=1)
     upcoming_end = today + timedelta(days=30)
     vendors = {vendor.id: _vendor_dto(vendor) for vendor in vendor_repository.list_vendors()}
+    material_options = {material.id: material for material in material_repository.list_materials()}
     recent = expense_repository.list_expenses(limit=min(max(limit, 1), 500))
     year_expenses = expense_repository.list_expenses(start_date=year_start, end_date=today)
     month_expenses = expense_repository.list_expenses(start_date=month_start, end_date=today)
@@ -645,6 +694,11 @@ def finance_workspace(limit: int = 200) -> dict[str, Any]:
             "payment_method": expense.payment_method,
             "vendor_id": expense.vendor_id,
             "vendor": vendors.get(expense.vendor_id),
+            "material_id": expense.material_id,
+            "material": (
+                {"id": material_options[expense.material_id].id, "sku": material_options[expense.material_id].sku, "name": material_options[expense.material_id].name}
+                if expense.material_id in material_options else None
+            ),
             "is_recurring": expense.is_recurring,
             "tags": expense.tags,
             "notes": expense.notes,
@@ -715,7 +769,11 @@ def finance_workspace(limit: int = 200) -> dict[str, Any]:
     }
 
 
-def _report_period(period: str) -> tuple[Optional[date], date, str]:
+def _report_period(
+    period: str,
+    custom_start: Optional[date] = None,
+    custom_end: Optional[date] = None,
+) -> tuple[Optional[date], date, str]:
     today = date.today()
     normalized = period.strip().casefold()
     if normalized == "this_month":
@@ -723,15 +781,42 @@ def _report_period(period: str) -> tuple[Optional[date], date, str]:
     if normalized == "this_quarter":
         quarter_month = ((today.month - 1) // 3) * 3 + 1
         return today.replace(month=quarter_month, day=1), today, "This quarter"
+    if normalized == "last_quarter":
+        this_quarter_month = ((today.month - 1) // 3) * 3 + 1
+        this_quarter_start = today.replace(month=this_quarter_month, day=1)
+        end = this_quarter_start - timedelta(days=1)
+        start = end.replace(month=((end.month - 1) // 3) * 3 + 1, day=1)
+        return start, end, "Last quarter"
     if normalized == "last_90_days":
         return today - timedelta(days=89), today, "Last 90 days"
     if normalized == "all_time":
         return None, today, "All time"
+    if normalized == "custom_range":
+        if custom_start is None or custom_end is None:
+            raise BridgeError(
+                "validation_failed",
+                "Choose both a start date and an end date.",
+                HTTPStatus.BAD_REQUEST,
+            )
+        if custom_end < custom_start:
+            raise BridgeError(
+                "validation_failed",
+                "End date cannot be before the start date.",
+                HTTPStatus.BAD_REQUEST,
+                {"end_date": "before_start"},
+            )
+        start_label = f"{custom_start.strftime('%b')} {custom_start.day}, {custom_start.year}"
+        end_label = f"{custom_end.strftime('%b')} {custom_end.day}, {custom_end.year}"
+        return custom_start, custom_end, f"{start_label} – {end_label}"
     return today.replace(month=1, day=1), today, "This year"
 
 
-def reports_workspace(period: str = "this_year") -> dict[str, Any]:
-    start, end, label = _report_period(period)
+def reports_workspace(
+    period: str = "this_year",
+    custom_start: Optional[date] = None,
+    custom_end: Optional[date] = None,
+) -> dict[str, Any]:
+    start, end, label = _report_period(period, custom_start, custom_end)
     orders = order_repository.fetch_order_report(start, end)
     products = (
         order_repository.get_product_sales_summary(start, end)
@@ -785,7 +870,7 @@ def reports_workspace(period: str = "this_year") -> dict[str, Any]:
 
     return {
         "period": {
-            "key": period if period in {"this_month", "this_quarter", "this_year", "last_90_days", "all_time"} else "this_year",
+            "key": period if period in {"this_month", "this_quarter", "last_quarter", "this_year", "last_90_days", "all_time", "custom_range"} else "this_year",
             "label": label,
             "start": start.isoformat() if start else None,
             "end": end.isoformat(),
@@ -838,7 +923,7 @@ def reports_workspace(period: str = "this_year") -> dict[str, Any]:
                 "revenue": _money(item.total_amount),
                 "profit": _money(item.profit),
             }
-            for item in orders[:8]
+            for item in orders
         ],
     }
 
@@ -847,7 +932,7 @@ def about_workspace() -> dict[str, str]:
     return {
         "app_name": "HustleNest",
         "app_version": APP_VERSION,
-        "browser_version": "4.0.0",
+        "browser_version": "4.1.0",
         "repository_url": REPOSITORY_URL,
         "releases_url": RELEASES_URL,
         "runtime": "Local Python backend + browser UI",
@@ -878,7 +963,9 @@ def _comparison_periods(mode: str) -> tuple[date, date, date, date, str, str]:
 def report_download(query: dict[str, list[str]]) -> BinaryDownload:
     kind = query.get("kind", ["orders_csv"])[0].strip().casefold()
     period = query.get("period", ["this_year"])[0].strip().casefold()
-    start, end, label = _report_period(period)
+    custom_start = _date_field({"start_date": query.get("start", [""])[0]}, "start_date", "Start date", required=False)
+    custom_end = _date_field({"end_date": query.get("end", [""])[0]}, "end_date", "End date", required=False)
+    start, end, label = _report_period(period, custom_start, custom_end)
     effective_start = start or date(2000, 1, 1)
     settings = settings_repository.get_app_settings()
     business = _safe_download_stem(settings.business_name)
@@ -2527,25 +2614,20 @@ def create_quick_entry(payload: dict[str, Any]) -> dict[str, Any]:
             inventory = _nonnegative_number(values, "inventory_count", "Inventory quantity")
             if not inventory.is_integer():
                 raise BridgeError("validation_failed", "Product inventory must be a whole number.", HTTPStatus.BAD_REQUEST, {"inventory_count": "whole_number_required"})
-            created = product_repository.create_product(sku, name, mark_complete=True)
-            try:
-                saved = product_repository.update_product(Product(
-                    id=created.id,
-                    sku=sku,
-                    name=name,
-                    description=_optional_text(values, "description", 1000),
-                    photo_path="",
-                    inventory_count=int(inventory),
-                    is_complete=True,
-                    status=_product_status(values),
-                    base_unit_cost=_nonnegative_number(values, "unit_cost", "Unit cost"),
-                    default_unit_price=_nonnegative_number(values, "unit_price", "Unit price"),
-                    pricing_components=_cost_components(values),
-                ))
-            except Exception:
-                if created.id is not None:
-                    product_repository.delete_product(created.id)
-                raise
+            material_links = _product_material_links(values)
+            saved = product_repository.create_product_with_materials(Product(
+                id=None,
+                sku=sku,
+                name=name,
+                description=_optional_text(values, "description", 1000),
+                photo_path="",
+                inventory_count=int(inventory),
+                is_complete=True,
+                status=_product_status(values),
+                base_unit_cost=_nonnegative_number(values, "unit_cost", "Unit cost"),
+                default_unit_price=_nonnegative_number(values, "unit_price", "Unit price"),
+                pricing_components=_cost_components(values),
+            ), material_links)
             record_id = int(saved.id or 0)
             label = name
         elif entry_type == "vendor":
@@ -2611,6 +2693,9 @@ def create_quick_entry(payload: dict[str, Any]) -> dict[str, Any]:
             vendor_id = _optional_id(values, "vendor_id")
             if vendor_id and vendor_repository.get_vendor(vendor_id) is None:
                 raise BridgeError("validation_failed", "The selected vendor no longer exists.", HTTPStatus.BAD_REQUEST, {"vendor_id": "not_found"})
+            material_id = _optional_id(values, "material_id")
+            if material_id and material_repository.get_material(material_id) is None:
+                raise BridgeError("validation_failed", "The selected material no longer exists.", HTTPStatus.BAD_REQUEST, {"material_id": "not_found"})
             record_id = expense_repository.save_expense(Expense(
                 id=None,
                 category=category,
@@ -2619,6 +2704,7 @@ def create_quick_entry(payload: dict[str, Any]) -> dict[str, Any]:
                 description=_optional_text(values, "description", 500),
                 payment_method=_optional_text(values, "payment_method", 100),
                 vendor_id=vendor_id,
+                material_id=material_id,
                 notes=_optional_text(values, "notes", 1000),
             ))
             label = category
@@ -2687,7 +2773,10 @@ def update_operational_entry(entry_type: str, record_id: int, values: dict[str, 
                 existing_product.status = _product_status(values)
             if "cost_components" in values:
                 existing_product.pricing_components = _cost_components(values)
-            product_repository.update_product(existing_product)
+            if "materials" in values:
+                product_repository.update_product_with_materials(existing_product, _product_material_links(values))
+            else:
+                product_repository.update_product(existing_product)
             label = name
         elif entry_type == "material":
             existing_material = material_repository.get_material(record_id)
@@ -2761,12 +2850,16 @@ def update_operational_entry(entry_type: str, record_id: int, values: dict[str, 
             vendor_id = _optional_id(values, "vendor_id")
             if vendor_id and vendor_repository.get_vendor(vendor_id) is None:
                 raise BridgeError("validation_failed", "The selected vendor no longer exists.", HTTPStatus.BAD_REQUEST, {"vendor_id": "not_found"})
+            material_id = _optional_id(values, "material_id")
+            if material_id and material_repository.get_material(material_id) is None:
+                raise BridgeError("validation_failed", "The selected material no longer exists.", HTTPStatus.BAD_REQUEST, {"material_id": "not_found"})
             existing_expense.category = _required_text(values, "category", "Expense category", 120)
             existing_expense.amount = _nonnegative_number(values, "amount", "Expense amount", positive=True)
             existing_expense.expense_date = _entry_date(values)
             existing_expense.description = _optional_text(values, "description", 500)
             existing_expense.payment_method = _optional_text(values, "payment_method", 100)
             existing_expense.vendor_id = vendor_id
+            existing_expense.material_id = material_id
             existing_expense.notes = _optional_text(values, "notes", 1000)
             expense_repository.save_expense(existing_expense)
             label = existing_expense.category
@@ -2913,6 +3006,7 @@ def get_material_detail(material_id: int) -> dict[str, Any]:
         }
         for transaction in material_repository.fetch_transactions(material_id, limit=20)
     ]
+    payload["products"] = product_repository.list_material_products(material_id)
     return payload
 
 
@@ -3075,7 +3169,7 @@ def order_dto(order: Order, contacts: Optional[dict[str, CRMContact]] = None) ->
 
 
 def list_orders(limit: int = 50) -> list[dict[str, Any]]:
-    safe_limit = min(max(int(limit), 1), 200)
+    safe_limit = min(max(int(limit), 1), 2000)
     contacts = _contact_index()
     return [order_dto(order, contacts) for order in order_repository.fetch_orders(safe_limit)]
 
@@ -3091,7 +3185,7 @@ def get_order(order_id: int) -> dict[str, Any]:
 
 
 def order_metrics() -> dict[str, Any]:
-    orders = order_repository.fetch_orders(200)
+    orders = order_repository.fetch_orders(2000)
     open_orders = [order for order in orders if order.status not in {"Shipped", "Cancelled"}]
     unpaid = [order for order in open_orders if not order.is_paid]
     ready = [order for order in open_orders if order.status == "Ready to Ship"]
@@ -3216,7 +3310,10 @@ def _build_order_from_draft(draft: dict[str, Any], existing: Optional[Order] = N
                 quantity=max(quantity, 0),
                 unit_price=unit_price,
                 base_unit_cost=product.base_unit_cost,
-                cost_components=list(product.pricing_components),
+                cost_components=(
+                    list(product.pricing_components)
+                    + (product_repository.product_material_cost_components(product.id) if product.id is not None else [])
+                ),
                 is_freebie=bool(raw_item.get("is_freebie", False)),
             )
         )
@@ -3516,8 +3613,11 @@ class BridgeApplication:
                 raise BridgeError("invalid_limit", "Limit must be a number.", HTTPStatus.BAD_REQUEST) from exc
             return HTTPStatus.OK, finance_workspace(limit)
         if method == "GET" and path == "/api/reports":
-            period = parse_qs(parsed.query).get("period", ["this_year"])[0]
-            return HTTPStatus.OK, reports_workspace(period)
+            query = parse_qs(parsed.query)
+            period = query.get("period", ["this_year"])[0]
+            custom_start = _date_field({"start_date": query.get("start", [""])[0]}, "start_date", "Start date", required=False)
+            custom_end = _date_field({"end_date": query.get("end", [""])[0]}, "end_date", "End date", required=False)
+            return HTTPStatus.OK, reports_workspace(period, custom_start, custom_end)
         if method == "GET" and path == "/api/reports/export":
             return HTTPStatus.OK, report_download(parse_qs(parsed.query))
         if method == "GET" and path == "/api/history":

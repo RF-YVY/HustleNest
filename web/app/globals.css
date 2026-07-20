@@ -449,6 +449,10 @@ button { color: inherit; }
 .report-period { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 0.5rem; font-weight: 750; }
 .report-period select { min-width: 135px; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface); font: inherit; outline: 0; }
 .report-period select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 12%, transparent); }
+.report-date { display: grid; gap: 3px; color: var(--muted); font-size: 0.5rem; font-weight: 750; }
+.report-date input { height: 36px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface); font: inherit; outline: 0; color-scheme: light dark; }
+.report-date input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 12%, transparent); }
+.report-apply { min-height: 36px; }
 .reports-metrics.loading { opacity: .58; }
 .reports-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 14px; }
 .report-card { min-width: 0; padding: 19px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: var(--shadow); }
@@ -965,6 +969,7 @@ button { color: inherit; }
   .reports-heading { align-items: flex-start; }
   .report-heading-actions { justify-content: flex-start; }
   .report-period { width: 100%; justify-content: space-between; }
+  .report-date { flex: 1 1 130px; }
   .trend-chart { overflow-x: auto; }
   .recent-report-orders > button { grid-template-columns: minmax(0, 1fr) auto; }
   .recent-report-orders > button > em, .recent-report-orders > button > span:nth-child(3) { display: none; }
@@ -1041,6 +1046,12 @@ button { color: inherit; }
 .cost-component-editor > div { display: grid; grid-template-columns: minmax(0, 1fr) 105px auto; gap: 7px; }
 .cost-component-editor .icon-button { color: var(--rose); border: 1px solid var(--line); }
 .cost-component-editor > .secondary-button { justify-self: start; }
+.product-material-editor { display: grid; gap: 9px; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.product-material-editor legend { padding: 0 5px; color: var(--muted); font-size: 0.5625rem; font-weight: 750; }
+.product-material-editor > div { display: grid; grid-template-columns: minmax(0, 1fr) 105px 130px auto; gap: 7px; }
+.product-material-editor .icon-button { color: var(--rose); border: 1px solid var(--line); }
+.product-material-editor > .secondary-button { justify-self: start; }
+.product-material-editor > small { color: var(--muted); font-size: 0.5rem; }
 .quick-add-error { margin: 0; padding: 10px 12px; border-radius: 9px; color: var(--rose); background: var(--rose-soft); font-size: 0.625rem; font-weight: 700; }
 .quick-add-actions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 5px; }
 .inventory-action-types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
@@ -1274,6 +1285,8 @@ button { color: inherit; }
   .quick-add-types { grid-template-columns: repeat(7, 70px); }
   .quick-add-form { padding: 20px 18px 28px; }
   .quick-form-pair, .quick-form-triple { grid-template-columns: 1fr; }
+  .product-material-editor > div { grid-template-columns: 1fr; }
+  .product-material-editor > div > .icon-button { justify-self: end; }
   .goal-picker > button { min-width: 135px; }
   .relationship-cadence > div:last-child, .follow-up-fields { grid-template-columns: 1fr; }
   .follow-up-fields > div { grid-column: auto; }

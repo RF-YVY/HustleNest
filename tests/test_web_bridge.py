@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import base64
 import io
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -24,7 +25,7 @@ from hustlenest.data import (
     settings_repository,
     vendor_repository,
 )
-from hustlenest.data.database import close_database_for_replacement, initialize
+from hustlenest.data.database import close_database_for_replacement, create_connection, get_database_path, initialize
 from hustlenest.models.order_models import (
     CRMContact,
     CostComponent,
@@ -41,7 +42,7 @@ from hustlenest.models.order_models import (
 )
 from hustlenest.web_bridge import BinaryDownload, BridgeApplication, BridgeError
 from hustlenest import browser_launcher
-from hustlenest.services import order_service, soft_delete_service
+from hustlenest.services import order_service, report_service, soft_delete_service
 
 
 class OrdersBridgeTests(unittest.TestCase):
@@ -190,6 +191,8 @@ class OrdersBridgeTests(unittest.TestCase):
         _, metrics = self.application.dispatch("GET", "/api/orders/metrics")
         self.assertEqual(metrics["open_orders"], 0)
         self.assertEqual(metrics["awaiting_payment_count"], 0)
+        _, all_orders = self.application.dispatch("GET", "/api/orders?limit=10")
+        self.assertEqual(all_orders[0]["status"], "Cancelled")
 
         with self.assertRaises(BridgeError) as stale_cancel:
             self.application.dispatch(
@@ -502,6 +505,58 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertEqual(reports["products"][0]["quantity"], 2)
         self.assertEqual(reports["customers"][0]["name"], "Test Customer")
         self.assertEqual(reports["fulfillment"][0]["status"], "Received")
+
+    def test_reports_support_last_quarter_and_custom_date_ranges(self) -> None:
+        today = date.today()
+        this_quarter_start = date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
+        last_quarter_end = this_quarter_start - timedelta(days=1)
+        last_quarter_start = date(
+            last_quarter_end.year,
+            ((last_quarter_end.month - 1) // 3) * 3 + 1,
+            1,
+        )
+        historical_id = order_repository.insert_order(
+            Order(
+                order_number="HN-LAST-QTR",
+                customer_name="Quarterly Customer",
+                customer_address="",
+                order_date=last_quarter_start,
+                status="Received",
+                items=[
+                    OrderItem(
+                        product_name="Test Product",
+                        product_description="Historical sale",
+                        product_sku="TEST-001",
+                        quantity=1,
+                        unit_price=9.0,
+                    )
+                ],
+            )
+        )
+
+        status, last_quarter = self.application.dispatch("GET", "/api/reports?period=last_quarter")
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(last_quarter["period"]["start"], last_quarter_start.isoformat())
+        self.assertEqual(last_quarter["period"]["end"], last_quarter_end.isoformat())
+        self.assertIn(historical_id, [item["id"] for item in last_quarter["recent_orders"]])
+
+        custom_target = (
+            "/api/reports?period=custom_range"
+            f"&start={last_quarter_start.isoformat()}&end={last_quarter_start.isoformat()}"
+        )
+        status, custom = self.application.dispatch("GET", custom_target)
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(custom["period"]["key"], "custom_range")
+        self.assertEqual(custom["metrics"]["order_count"], 1)
+        self.assertEqual(custom["recent_orders"][0]["id"], historical_id)
+
+    def test_reports_reject_invalid_custom_date_range(self) -> None:
+        with self.assertRaises(BridgeError) as error:
+            self.application.dispatch(
+                "GET",
+                "/api/reports?period=custom_range&start=2026-04-02&end=2026-04-01",
+            )
+        self.assertEqual(error.exception.status, HTTPStatus.BAD_REQUEST)
 
     def test_browser_report_exports_cover_csv_tax_and_printable_pdf(self) -> None:
         csv_status, orders_csv = self.application.dispatch(
@@ -1115,6 +1170,9 @@ class OrdersBridgeTests(unittest.TestCase):
         download_path.write_bytes(download.content)
         with sqlite3.connect(download_path) as check:
             self.assertEqual(check.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertTrue(check.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'product_materials'").fetchone())
+            self.assertIn("include_in_unit_cost", {row[1] for row in check.execute("PRAGMA table_info(product_materials)").fetchall()})
+            self.assertIn("material_id", {row[1] for row in check.execute("PRAGMA table_info(expenses)").fetchall()})
 
         settings_repository.set_setting("business_name", "Changed after backup")
         with self.assertRaises(BridgeError) as confirmation:
@@ -1131,6 +1189,61 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertEqual(restore_status, HTTPStatus.OK)
         self.assertTrue(restored["restart_required"])
         self.assertNotEqual(settings_repository.get_setting("business_name"), "Changed after backup")
+
+    def test_initialize_upgrades_a_v4_database_without_losing_records(self) -> None:
+        close_database_for_replacement()
+        database_path = get_database_path()
+        database_path.unlink(missing_ok=True)
+        with sqlite3.connect(database_path) as legacy:
+            legacy.executescript(
+                """
+                CREATE TABLE products (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '', photo_path TEXT NOT NULL DEFAULT '',
+                    inventory_count INTEGER NOT NULL DEFAULT 0, is_complete INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'Ordered', base_unit_cost REAL NOT NULL DEFAULT 0,
+                    default_unit_price REAL NOT NULL DEFAULT 0, pricing_components TEXT NOT NULL DEFAULT '[]',
+                    deleted_at TEXT
+                );
+                CREATE TABLE vendors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
+                CREATE TABLE materials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+                    unit_of_measure TEXT NOT NULL DEFAULT '', quantity_on_hand REAL NOT NULL DEFAULT 0,
+                    reorder_point REAL NOT NULL DEFAULT 0, cost_per_unit REAL NOT NULL DEFAULT 0,
+                    vendor_id INTEGER, last_restocked TEXT, notes TEXT NOT NULL DEFAULT '',
+                    lead_time_days INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE expenses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, vendor_id INTEGER, category TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '', amount REAL NOT NULL, expense_date TEXT NOT NULL,
+                    payment_method TEXT NOT NULL DEFAULT '', is_recurring INTEGER NOT NULL DEFAULT 0,
+                    recurring_id INTEGER, document_id INTEGER, tags TEXT NOT NULL DEFAULT '[]',
+                    notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE product_materials (
+                    product_id INTEGER NOT NULL, material_id INTEGER NOT NULL,
+                    quantity_required REAL NOT NULL DEFAULT 1,
+                    PRIMARY KEY(product_id, material_id)
+                );
+                INSERT INTO products (sku, name, inventory_count, is_complete, status) VALUES ('V4-PROD', 'Legacy product', 3, 1, 'Available');
+                INSERT INTO materials (sku, name, unit_of_measure, quantity_on_hand, cost_per_unit) VALUES ('V4-MAT', 'Legacy material', 'box', 8, 2.5);
+                INSERT INTO expenses (category, amount, expense_date) VALUES ('Legacy supplies', 12, '2026-01-15');
+                INSERT INTO product_materials (product_id, material_id, quantity_required) VALUES (1, 1, 2);
+                """
+            )
+            legacy.commit()
+
+        initialize()
+        with sqlite3.connect(database_path) as upgraded:
+            self.assertEqual(upgraded.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertTrue(upgraded.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'product_materials'").fetchone())
+            self.assertIn("include_in_unit_cost", {row[1] for row in upgraded.execute("PRAGMA table_info(product_materials)").fetchall()})
+            self.assertEqual(upgraded.execute("SELECT include_in_unit_cost FROM product_materials").fetchone()[0], 1)
+            self.assertIn("material_id", {row[1] for row in upgraded.execute("PRAGMA table_info(expenses)").fetchall()})
+            self.assertEqual(upgraded.execute("SELECT name FROM products WHERE sku = 'V4-PROD'").fetchone()[0], "Legacy product")
+            self.assertEqual(upgraded.execute("SELECT name FROM materials WHERE sku = 'V4-MAT'").fetchone()[0], "Legacy material")
+            self.assertEqual(upgraded.execute("SELECT category FROM expenses").fetchone()[0], "Legacy supplies")
 
     def test_browser_previews_maps_and_imports_products_orders_and_customers(self) -> None:
         def upload(name: str, content: str) -> dict[str, str]:
@@ -1244,6 +1357,150 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertTrue(any(item.sku == "MAT-QUICK" for item in material_repository.list_materials()))
         self.assertTrue(any(item.category == "Supplies" for item in expense_repository.list_expenses()))
         self.assertTrue(any(item.category == "Damage" for item in loss_repository.fetch_losses()))
+
+    def test_products_and_expenses_link_to_materials(self) -> None:
+        material_id = material_repository.save_material(
+            Material(
+                id=None,
+                sku="LINK-MAT",
+                name="Linked packaging",
+                unit_of_measure="box",
+                quantity_on_hand=20,
+                cost_per_unit=1.5,
+            )
+        )
+        _, products = self.application.dispatch("GET", "/api/products?limit=200")
+        product = next(item for item in products if item["id"] == self.product.id)
+        status, _ = self.application.dispatch(
+            "PUT",
+            f"/api/records/product/{self.product.id}",
+            {
+                "expected_revision": product["revision"],
+                "values": {
+                    "sku": self.product.sku,
+                    "name": self.product.name,
+                    "inventory_count": self.product.inventory_count,
+                    "unit_cost": self.product.base_unit_cost,
+                    "unit_price": self.product.default_unit_price,
+                    "materials": json.dumps([{"material_id": material_id, "quantity_required": 2}]),
+                },
+            },
+        )
+        self.assertEqual(status, HTTPStatus.OK)
+
+        _, refreshed_products = self.application.dispatch("GET", "/api/products?limit=200")
+        linked_product = next(item for item in refreshed_products if item["id"] == self.product.id)
+        self.assertEqual(linked_product["materials"][0]["name"], "Linked packaging")
+        self.assertEqual(linked_product["materials"][0]["quantity_required"], 2)
+        self.assertTrue(linked_product["materials"][0]["include_in_unit_cost"])
+        self.assertEqual(linked_product["materials"][0]["cost_per_product"], "3.00")
+        self.assertEqual(linked_product["material_unit_cost"], "3.00")
+        self.assertEqual(linked_product["unit_cost"], "7.00")
+
+        _, material_detail = self.application.dispatch("GET", f"/api/materials/{material_id}")
+        self.assertEqual(material_detail["products"][0]["product_id"], self.product.id)
+        self.assertTrue(material_detail["products"][0]["include_in_unit_cost"])
+
+        _, created_expense = self.application.dispatch(
+            "POST",
+            "/api/quick-add",
+            {
+                "type": "expense",
+                "values": {
+                    "category": "Packaging supplies",
+                    "amount": 30,
+                    "date": date.today().isoformat(),
+                    "material_id": material_id,
+                },
+            },
+        )
+        _, finance = self.application.dispatch("GET", "/api/finance")
+        linked_expense = next(item for item in finance["expenses"] if item["id"] == created_expense["id"])
+        self.assertEqual(linked_expense["material_id"], material_id)
+        self.assertEqual(linked_expense["material"]["name"], "Linked packaging")
+
+        order_status, created_order = self.application.dispatch(
+            "POST",
+            "/api/orders",
+            {
+                "customer": {"name": "Material Cost Customer", "address": "1 Cost Way"},
+                "items": [{"product_id": self.product.id, "quantity": 1, "unit_price": 12.5}],
+                "order_date": date.today().isoformat(),
+                "status": "Received",
+            },
+        )
+        self.assertEqual(order_status, HTTPStatus.CREATED)
+        saved_order = order_repository.fetch_order(created_order["id"])
+        self.assertEqual(saved_order.items[0].unit_cost, 7)
+        self.assertEqual(saved_order.items[0].cost_components[0].label, "Material: Linked packaging")
+        self.assertEqual(material_repository.get_material(material_id).quantity_on_hand, 20)
+        _, reports = self.application.dispatch("GET", "/api/reports?period=this_year")
+        reported_order = next(item for item in reports["recent_orders"] if item["id"] == created_order["id"])
+        self.assertEqual(reported_order["profit"], "5.50")
+        inventory_html = report_service.generate_inventory_report_html(settings_repository.get_app_settings())
+        self.assertIn("$7.00", inventory_html)
+
+        _, post_order_products = self.application.dispatch("GET", "/api/products?limit=200")
+        post_order_product = next(item for item in post_order_products if item["id"] == self.product.id)
+        status, _ = self.application.dispatch(
+            "PUT",
+            f"/api/records/product/{self.product.id}",
+            {
+                "expected_revision": post_order_product["revision"],
+                "values": {
+                    "sku": self.product.sku,
+                    "name": self.product.name,
+                    "inventory_count": post_order_product["inventory_count"],
+                    "unit_cost": self.product.base_unit_cost,
+                    "unit_price": self.product.default_unit_price,
+                    "materials": json.dumps([{
+                        "material_id": material_id,
+                        "quantity_required": 2,
+                        "include_in_unit_cost": False,
+                    }]),
+                },
+            },
+        )
+        self.assertEqual(status, HTTPStatus.OK)
+        _, refreshed_products = self.application.dispatch("GET", "/api/products?limit=200")
+        tracked_product = next(item for item in refreshed_products if item["id"] == self.product.id)
+        self.assertFalse(tracked_product["materials"][0]["include_in_unit_cost"])
+        self.assertEqual(tracked_product["material_unit_cost"], "0.00")
+        self.assertEqual(tracked_product["unit_cost"], "4.00")
+        self.assertEqual(order_repository.fetch_order(created_order["id"]).items[0].unit_cost, 7)
+
+        future_status, future_order = self.application.dispatch(
+            "POST",
+            "/api/orders",
+            {
+                "customer": {"name": "Track Only Customer", "address": "2 Cost Way"},
+                "items": [{"product_id": self.product.id, "quantity": 1, "unit_price": 12.5}],
+                "order_date": date.today().isoformat(),
+                "status": "Received",
+            },
+        )
+        self.assertEqual(future_status, HTTPStatus.CREATED)
+        future_snapshot = order_repository.fetch_order(future_order["id"]).items[0]
+        self.assertEqual(future_snapshot.unit_cost, 4)
+        self.assertEqual(future_snapshot.cost_components, [])
+
+    def test_product_recipe_update_rolls_back_product_fields_on_failure(self) -> None:
+        original = product_repository.get_product_by_id(self.product.id)
+        original.name = "Should roll back"
+        with patch("hustlenest.data.product_repository._replace_product_materials", side_effect=RuntimeError("recipe write failed")):
+            with self.assertRaises(RuntimeError):
+                product_repository.update_product_with_materials(original, [])
+        self.assertEqual(product_repository.get_product_by_id(self.product.id).name, "Test Product")
+
+    def test_browser_product_catalog_does_not_stop_at_one_hundred(self) -> None:
+        with create_connection() as connection:
+            connection.executemany(
+                "INSERT INTO products (sku, name, is_complete, status) VALUES (?, ?, 1, 'Available')",
+                [(f"BULK-{index:03d}", f"Bulk product {index}") for index in range(105)],
+            )
+            connection.commit()
+        _, products = self.application.dispatch("GET", "/api/products?limit=2000")
+        self.assertGreaterEqual(len(products), 106)
 
     def test_quick_add_rejects_invalid_and_duplicate_records(self) -> None:
         with self.assertRaises(BridgeError) as invalid:

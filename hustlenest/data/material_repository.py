@@ -192,6 +192,7 @@ def set_material_archived(material_id: int, archived: bool) -> None:
 
 def delete_material(material_id: int) -> None:
     with create_connection() as connection:
+        connection.execute("UPDATE expenses SET material_id = NULL WHERE material_id = ?", (int(material_id),))
         connection.execute("DELETE FROM materials WHERE id = ?", (int(material_id),))
         connection.commit()
 

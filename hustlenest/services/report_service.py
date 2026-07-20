@@ -360,12 +360,17 @@ def generate_inventory_report_html(settings: AppSettings) -> str:
         HTML string
     """
     products = product_repository.list_products()
+    unit_costs = {
+        product.id: product.total_unit_cost + product_repository.product_material_cost(product.id)
+        for product in products
+        if product.id is not None
+    }
     
     # Sort by inventory count (low first)
     products.sort(key=lambda p: p.inventory_count)
     
     low_stock = [p for p in products if p.inventory_count <= settings.low_inventory_threshold]
-    total_value = sum(p.inventory_count * p.base_unit_cost for p in products)
+    total_value = sum(p.inventory_count * unit_costs.get(p.id, p.total_unit_cost) for p in products)
     total_retail = sum(p.inventory_count * p.default_unit_price for p in products)
     
     html = f"""
@@ -521,7 +526,8 @@ def generate_inventory_report_html(settings: AppSettings) -> str:
     for product in products:
         is_low = product.inventory_count <= settings.low_inventory_threshold
         stock_class = "low-stock" if is_low else ""
-        value = product.inventory_count * product.base_unit_cost
+        unit_cost = unit_costs.get(product.id, product.total_unit_cost)
+        value = product.inventory_count * unit_cost
         
         html += f"""
             <tr>
@@ -529,7 +535,7 @@ def generate_inventory_report_html(settings: AppSettings) -> str:
                 <td>{product.name}</td>
                 <td>{product.status}</td>
                 <td class="text-right {stock_class}">{product.inventory_count}</td>
-                <td class="text-right">{_format_currency(product.base_unit_cost)}</td>
+                <td class="text-right">{_format_currency(unit_cost)}</td>
                 <td class="text-right">{_format_currency(product.default_unit_price)}</td>
                 <td class="text-right">{_format_currency(value)}</td>
             </tr>

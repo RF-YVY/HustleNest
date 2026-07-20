@@ -279,10 +279,10 @@ export default function HustleNestWorkspace() {
     const controller = new AbortController();
 
     Promise.all([
-      fetch(`${bridgeUrl}/api/orders?limit=100`, { signal: controller.signal }),
+      fetch(`${bridgeUrl}/api/orders?limit=2000`, { signal: controller.signal }),
       fetch(`${bridgeUrl}/api/orders/metrics`, { signal: controller.signal }),
       fetch(`${bridgeUrl}/api/customers?limit=200`, { signal: controller.signal }),
-      fetch(`${bridgeUrl}/api/products?limit=200`, { signal: controller.signal }),
+      fetch(`${bridgeUrl}/api/products?limit=2000`, { signal: controller.signal }),
       fetch(`${bridgeUrl}/api/materials?limit=200`, { signal: controller.signal }),
       fetch(`${bridgeUrl}/api/vendors?limit=200`, { signal: controller.signal }),
       fetch(`${bridgeUrl}/api/finance?limit=200`, { signal: controller.signal }),
@@ -616,10 +616,10 @@ export default function HustleNestWorkspace() {
     if (!customer.id) return;
     setEditingRecord({ id: customer.id, type: "customer", revision: customer.revision, values: { name: customer.name, company: customer.company, email: customer.email, phone: customer.phone, address: customer.address, notes: customer.notes } });
   };
-  const editProduct = (product: ProductOption) => setEditingRecord({ id: product.id, type: "product", revision: product.revision, values: { sku: product.sku, name: product.name, description: product.description, inventory_count: String(product.inventory_count), unit_cost: product.base_unit_cost, unit_price: product.unit_price, status: product.status, cost_components: JSON.stringify(product.cost_components) } });
+  const editProduct = (product: ProductOption) => setEditingRecord({ id: product.id, type: "product", revision: product.revision, values: { sku: product.sku, name: product.name, description: product.description, inventory_count: String(product.inventory_count), unit_cost: product.base_unit_cost, unit_price: product.unit_price, status: product.status, cost_components: JSON.stringify(product.cost_components), materials: JSON.stringify(product.materials.map((item) => ({ material_id: item.material_id, quantity_required: item.quantity_required, include_in_unit_cost: item.include_in_unit_cost }))) } });
   const editMaterial = (material: MaterialOption) => setEditingRecord({ id: material.id, type: "material", revision: material.revision, values: { sku: material.sku, name: material.name, category: material.category, description: material.description, unit_of_measure: material.unit_of_measure, quantity_on_hand: String(material.quantity_on_hand), reorder_point: String(material.reorder_point), cost_per_unit: material.cost_per_unit, vendor_id: material.vendor_id ? String(material.vendor_id) : "", notes: material.notes } });
   const editVendor = (vendor: VendorOption) => setEditingRecord({ id: vendor.id, type: "vendor", revision: vendor.revision, values: { name: vendor.name, contact_name: vendor.contact_name, email: vendor.email, phone: vendor.phone, website: vendor.website, account_number: vendor.account_number, preferred_payment_method: vendor.preferred_payment_method, notes: vendor.notes } });
-  const editExpense = (expense: FinanceWorkspaceData["expenses"][number]) => setEditingRecord({ id: expense.id, type: "expense", revision: expense.revision, values: { category: expense.category, amount: expense.amount, date: expense.expense_date, description: expense.description, vendor_id: expense.vendor_id ? String(expense.vendor_id) : "", payment_method: expense.payment_method, notes: expense.notes } });
+  const editExpense = (expense: FinanceWorkspaceData["expenses"][number]) => setEditingRecord({ id: expense.id, type: "expense", revision: expense.revision, values: { category: expense.category, amount: expense.amount, date: expense.expense_date, description: expense.description, vendor_id: expense.vendor_id ? String(expense.vendor_id) : "", material_id: expense.material_id ? String(expense.material_id) : "", payment_method: expense.payment_method, notes: expense.notes } });
   const editRecurring = (item: FinanceWorkspaceData["recurring"][number]) => setEditingRecord({ id: item.id, type: "recurring", revision: item.revision, values: { category: item.category, amount: item.amount, frequency: item.frequency.toLowerCase(), start_date: item.start_date ?? "", next_occurrence: item.next_occurrence ?? "", end_date: item.end_date ?? "", auto_record: String(item.auto_record), vendor_id: item.vendor_id ? String(item.vendor_id) : "", notes: item.notes } });
   const editLoss = (loss: FinanceWorkspaceData["losses"][number]) => setEditingRecord({ id: loss.id, type: "loss", revision: loss.revision, values: { category: loss.category, amount: loss.amount, date: loss.loss_date, description: loss.description, notes: loss.details } });
   const handleInteractionSaved = (customer: CustomerDetail) => {
@@ -915,7 +915,7 @@ export default function HustleNestWorkspace() {
             onChanged={(message) => { setBridgeMessage(message); setReloadKey((value) => value + 1); }}
           />
         ) : activeView === "materials" ? (
-          <MaterialsWorkspace key={`materials-${focusedMaterialId ?? "list"}-${reloadKey}`} materials={materials} focusMaterialId={focusedMaterialId} onEdit={editMaterial} onAdjust={setAdjustingMaterial} />
+          <MaterialsWorkspace key={`materials-${focusedMaterialId ?? "list"}-${reloadKey}`} materials={materials} focusMaterialId={focusedMaterialId} onEdit={editMaterial} onAdjust={setAdjustingMaterial} onOpenProduct={(id) => { setFocusedProductId(id); setActiveView("products"); }} />
         ) : activeView === "vendors" ? (
           <VendorsWorkspace key={`vendors-${focusedVendorId ?? "list"}-${reloadKey}`} vendors={vendors} onOpenMaterial={openMaterial} focusVendorId={focusedVendorId} onEdit={editVendor} />
         ) : activeView === "finance" ? (
@@ -959,7 +959,7 @@ export default function HustleNestWorkspace() {
           onSaved={handleOrderSaved}
         />
       ) : null}
-      {quickAddOpen || editingRecord ? <QuickAddPanel editRecord={editingRecord} vendors={vendors} onClose={() => { setQuickAddOpen(false); setEditingRecord(null); }} onSaved={handleQuickAddSaved} onDeleted={handleQuickAddDeleted} /> : null}
+      {quickAddOpen || editingRecord ? <QuickAddPanel editRecord={editingRecord} vendors={vendors} materials={materials} onClose={() => { setQuickAddOpen(false); setEditingRecord(null); }} onSaved={handleQuickAddSaved} onDeleted={handleQuickAddDeleted} /> : null}
       {goalPanelOpen ? <GoalPanel onClose={() => setGoalPanelOpen(false)} onChanged={(message) => { setBridgeMessage(message); setReloadKey((value) => value + 1); }} /> : null}
       {adjustingMaterial ? <InventoryAdjustmentPanel material={adjustingMaterial} onClose={() => setAdjustingMaterial(null)} onSaved={handleInventoryAdjusted} /> : null}
       {cancelCandidate ? <div className="composer-backdrop lifecycle-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && lifecycleAction !== "cancel") setCancelCandidate(null); }}><section className="lifecycle-dialog" role="alertdialog" aria-modal="true" aria-labelledby="cancel-order-title"><span className="lifecycle-dialog-icon"><Ban size={22} /></span><h2 id="cancel-order-title">Cancel {cancelCandidate.number}?</h2><p>This stops the order and restores all of its product quantities. The order remains available for your records.</p><div><button className="secondary-button" onClick={() => setCancelCandidate(null)} disabled={lifecycleAction === "cancel"}>Keep order</button><button className="danger-button" onClick={() => void cancelSelectedOrder()} disabled={lifecycleAction === "cancel"}>{lifecycleAction === "cancel" ? "Cancelling…" : "Cancel order"}</button></div></section></div> : null}

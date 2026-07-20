@@ -17,9 +17,11 @@ const money = (value: string | number) => new Intl.NumberFormat("en-US", { style
 const periods = [
   ["this_month", "This month"],
   ["this_quarter", "This quarter"],
+  ["last_quarter", "Last quarter"],
   ["this_year", "This year"],
   ["last_90_days", "Last 90 days"],
   ["all_time", "All time"],
+  ["custom_range", "Custom range"],
 ];
 const reportExports = [
   ["orders_csv", "Order detail CSV"],
@@ -37,12 +39,34 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
   const [period, setPeriod] = useState(initialReports?.period.key ?? "this_year");
   const [loading, setLoading] = useState(false);
   const [exportKind, setExportKind] = useState("orders_csv");
+  const [customStart, setCustomStart] = useState(initialReports?.period.start ?? "");
+  const [customEnd, setCustomEnd] = useState(initialReports?.period.end ?? new Date().toISOString().slice(0, 10));
+  const reportQuery = (nextPeriod: string) => {
+    const query = new URLSearchParams({ period: nextPeriod });
+    if (nextPeriod === "custom_range") {
+      query.set("start", customStart);
+      query.set("end", customEnd);
+    }
+    return query.toString();
+  };
   const selectPeriod = async (nextPeriod: string) => {
     setPeriod(nextPeriod);
+    if (nextPeriod === "custom_range") return;
     setLoading(true);
-    try { setReports(await getBridgeData<ReportsWorkspaceData>(`/api/reports?period=${nextPeriod}`)); }
+    try { setReports(await getBridgeData<ReportsWorkspaceData>(`/api/reports?${reportQuery(nextPeriod)}`)); }
     finally { setLoading(false); }
   };
+  const applyCustomRange = async () => {
+    if (!customStart || !customEnd || customEnd < customStart) return;
+    setLoading(true);
+    try { setReports(await getBridgeData<ReportsWorkspaceData>(`/api/reports?${reportQuery("custom_range")}`)); }
+    finally { setLoading(false); }
+  };
+  const exportQuery = new URLSearchParams({ kind: exportKind, period });
+  if (period === "custom_range") {
+    exportQuery.set("start", customStart);
+    exportQuery.set("end", customEnd);
+  }
   const maxTrend = Math.max(...(reports?.trend.map((item) => Number(item.revenue)) ?? [0]), 1);
   const totalFulfillment = reports?.fulfillment.reduce((sum, item) => sum + item.count, 0) ?? 0;
 
@@ -50,7 +74,7 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
     <div className="workspace reports-page">
       <div className="page-heading reports-heading">
         <div><div className="eyebrow"><span>Understand</span><ChevronRight size={14} /><span>Reports</span></div><h1>Reports</h1><p>Turn sales, costs, and fulfillment activity into the next useful decision.</p></div>
-        <div className="report-heading-actions"><label className="report-period"><span>Reporting period</span><select aria-label="Reporting period" value={period} onChange={(event) => void selectPeriod(event.target.value)} disabled={loading}>{periods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label className="report-period"><span>Export</span><select aria-label="Report export type" value={exportKind} onChange={(event) => setExportKind(event.target.value)}>{reportExports.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><a className="secondary-button report-download" href={`${bridgeUrl}/api/reports/export?kind=${encodeURIComponent(exportKind)}&period=${encodeURIComponent(period)}`}><Download size={15} /> Download</a></div>
+        <div className="report-heading-actions"><label className="report-period"><span>Reporting period</span><select aria-label="Reporting period" value={period} onChange={(event) => void selectPeriod(event.target.value)} disabled={loading}>{periods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{period === "custom_range" ? <><label className="report-date"><span>From</span><input aria-label="Report start date" type="date" value={customStart} max={customEnd || undefined} onChange={(event) => setCustomStart(event.target.value)} /></label><label className="report-date"><span>To</span><input aria-label="Report end date" type="date" value={customEnd} min={customStart || undefined} onChange={(event) => setCustomEnd(event.target.value)} /></label><button className="secondary-button report-apply" onClick={() => void applyCustomRange()} disabled={loading || !customStart || !customEnd || customEnd < customStart}>Apply</button></> : null}<label className="report-period"><span>Export</span><select aria-label="Report export type" value={exportKind} onChange={(event) => setExportKind(event.target.value)}>{reportExports.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><a className="secondary-button report-download" href={`${bridgeUrl}/api/reports/export?${exportQuery.toString()}`}><Download size={15} /> Download</a></div>
       </div>
       <section className={loading ? "metric-grid reports-metrics loading" : "metric-grid reports-metrics"} aria-label="Report summary">
         <article className="metric-card accent-card"><div className="metric-icon"><CircleDollarSign size={20} /></div><div><span>Revenue</span><strong>{money(reports?.metrics.revenue ?? 0)}</strong><small><ArrowUpRight size={13} /> {reports?.metrics.revenue_change ?? 0}% vs prior period</small></div></article>
@@ -88,7 +112,7 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
         </article>
 
         <article className="report-card recent-report-orders">
-          <div className="report-card-heading"><div><span>Drill down</span><h2>Orders in this period</h2></div><strong>{reports?.recent_orders.length ?? 0} recent</strong></div>
+          <div className="report-card-heading"><div><span>Drill down</span><h2>Orders in this period</h2></div><strong>{reports?.recent_orders.length ?? 0} orders</strong></div>
           {reports?.recent_orders.map((order) => <button onClick={() => onOpenOrder(order.id)} key={order.id}><span><strong>{order.customer}</strong><small>{order.number} · {order.date}</small></span><em>{order.status}</em><span><strong>{money(order.revenue)}</strong><small>{money(order.profit)} profit</small></span><ChevronRight size={15} /></button>)}
           {!reports?.recent_orders.length ? <p className="quiet-empty">No orders to review in this period.</p> : null}
         </article>

@@ -232,6 +232,19 @@ def initialize() -> None:
             CREATE INDEX IF NOT EXISTS idx_material_transactions_material_id
             ON material_transactions(material_id);
 
+            CREATE TABLE IF NOT EXISTS product_materials (
+                product_id INTEGER NOT NULL,
+                material_id INTEGER NOT NULL,
+                quantity_required REAL NOT NULL DEFAULT 1,
+                include_in_unit_cost INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY(product_id, material_id),
+                FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE,
+                FOREIGN KEY(material_id) REFERENCES materials(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_product_materials_material_id
+            ON product_materials(material_id);
+
             CREATE TABLE IF NOT EXISTS losses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_id INTEGER,
@@ -281,6 +294,7 @@ def initialize() -> None:
             CREATE TABLE IF NOT EXISTS expenses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 vendor_id INTEGER,
+                material_id INTEGER,
                 category TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 amount REAL NOT NULL,
@@ -293,6 +307,7 @@ def initialize() -> None:
                 notes TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
+                FOREIGN KEY(material_id) REFERENCES materials(id) ON DELETE SET NULL,
                 FOREIGN KEY(recurring_id) REFERENCES recurring_expenses(id) ON DELETE SET NULL,
                 FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE SET NULL
             );
@@ -414,6 +429,9 @@ def initialize() -> None:
         _ensure_column(connection, "order_items", "applied_tax", "REAL NOT NULL DEFAULT 0")
         _ensure_column(connection, "order_items", "price_adjustment_note", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "materials", "category", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "expenses", "material_id", "INTEGER")
+        _ensure_column(connection, "product_materials", "include_in_unit_cost", "INTEGER NOT NULL DEFAULT 1")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_expenses_material_id ON expenses(material_id)")
         
         # Soft delete columns for undo/restore functionality
         _ensure_column(connection, "orders", "deleted_at", "TEXT")

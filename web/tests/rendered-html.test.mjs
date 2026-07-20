@@ -92,7 +92,8 @@ test("includes connected business, home, and reporting workspace modules", async
   assert.match(products, /Start order with/);
   assert.match(products, /Inventory available/);
   assert.match(products, /Stock outlook/);
-  assert.match(products, /Unit cost/);
+  assert.match(products, /Total unit cost/);
+  assert.match(products, /Materials used/);
   assert.match(products, /Add photo/);
   assert.match(products, /api\/products\/\$\{selected.id\}\/photo/);
   assert.match(products, /8 MB or smaller/);
@@ -101,6 +102,7 @@ test("includes connected business, home, and reporting workspace modules", async
   assert.match(materials, /Needs attention/);
   assert.match(materials, /Edit material/);
   assert.match(materials, /Adjust stock/);
+  assert.match(materials, /Used by products/);
   assert.match(inventoryAdjustment, /Add delivered stock/);
   assert.match(inventoryAdjustment, /Counted quantity on hand/);
   assert.match(inventoryAdjustment, /api\/materials\/\$\{material.id\}\/adjust/);
@@ -108,6 +110,7 @@ test("includes connected business, home, and reporting workspace modules", async
   assert.match(vendors, /Reorder exposure/);
   assert.match(vendors, /Edit vendor/);
   assert.match(finance, /Monthly recurring/);
+  assert.match(finance, /Open linked material/);
   assert.match(finance, /Year-to-date/);
   assert.match(finance, /Losses/);
   assert.match(finance, /Operational context/);

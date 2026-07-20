@@ -1,6 +1,6 @@
 # HustleNest
 
-Version: **v4.0**
+Version: **v4.1**
 
 HustleNest is a local-first business workspace with a browser interface and a Python backend. It brings orders, customers, inventory, vendors, finance, reports, documents, and settings into one smooth workflow while keeping business data in a local SQLite database.
 

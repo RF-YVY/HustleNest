@@ -265,8 +265,7 @@ def fetch_orders(limit: int = 50) -> List[Order]:
                 o.tax_included_in_total,
                 o.target_completion_date
             FROM orders AS o
-            WHERE UPPER(o.status) <> 'CANCELLED'
-              AND o.deleted_at IS NULL
+            WHERE o.deleted_at IS NULL
             ORDER BY o.order_date DESC
             LIMIT ?
             """,

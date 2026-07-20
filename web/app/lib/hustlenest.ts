@@ -146,6 +146,8 @@ export type ExpenseOption = {
   payment_method: string;
   vendor_id: number | null;
   vendor: VendorSummary | null;
+  material_id: number | null;
+  material: { id: number; sku: string; name: string } | null;
   is_recurring: boolean;
   tags: string[];
   notes: string;
@@ -424,6 +426,7 @@ export type MaterialDetail = MaterialOption & {
     reference_id: number | null;
     notes: string;
   }>;
+  products: Array<{ product_id: number; sku: string; name: string; quantity_required: number; include_in_unit_cost: boolean }>;
 };
 
 export type ProductOption = {
@@ -436,8 +439,10 @@ export type ProductOption = {
   unit_price: string;
   base_unit_cost: string;
   unit_cost: string;
+  material_unit_cost: string;
   additional_unit_cost: string;
   cost_components: Array<{ label: string; amount: string }>;
+  materials: Array<{ material_id: number; sku: string; name: string; unit_of_measure: string; quantity_required: number; include_in_unit_cost: boolean; cost_per_unit: string; cost_per_product: string }>;
   photo_configured: boolean;
   photo_available: boolean;
   is_complete: boolean;
