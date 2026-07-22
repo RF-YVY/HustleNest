@@ -9,6 +9,7 @@ import logging
 import mimetypes
 import shutil
 import sqlite3
+import time
 import zipcodes
 from math import isfinite
 import threading
@@ -944,7 +945,7 @@ def about_workspace() -> dict[str, str]:
     return {
         "app_name": "HustleNest",
         "app_version": APP_VERSION,
-        "browser_version": "4.2.0",
+        "browser_version": "4.2.1",
         "repository_url": REPOSITORY_URL,
         "releases_url": RELEASES_URL,
         "runtime": "Local Python backend + browser UI",
@@ -4352,7 +4353,20 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
     def _handle(self, method: str) -> None:
         try:
             body = self._read_json() if method in {"POST", "PUT", "DELETE"} else None
-            status, data = self.application.dispatch(method, self.path, body)
+            path = urlparse(self.path).path.rstrip("/") or "/"
+            lifecycle = getattr(self.server, "client_lifecycle", None)
+            if method == "POST" and path in {"/api/client/connect", "/api/client/heartbeat", "/api/client/disconnect"}:
+                client_id = str((body or {}).get("client_id", "")).strip()
+                if not client_id or len(client_id) > 128:
+                    raise BridgeError("invalid_client_id", "A valid browser client id is required.", HTTPStatus.BAD_REQUEST)
+                if lifecycle is not None:
+                    if path == "/api/client/disconnect":
+                        lifecycle.disconnect(client_id)
+                    else:
+                        lifecycle.connect(client_id)
+                status, data = HTTPStatus.OK, {"tracked": lifecycle is not None, "shutdown_enabled": bool(lifecycle and lifecycle.enabled)}
+            else:
+                status, data = self.application.dispatch(method, self.path, body)
             if isinstance(data, BinaryDownload):
                 self._write_download(status, data)
             else:
@@ -4417,10 +4431,93 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         LOGGER.info("%s - %s", self.address_string(), message % args)
 
 
-def run(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, browser_url: Optional[str] = None) -> None:
+class BrowserClientLifecycle:
+    """Stop a packaged bridge after its final browser workspace disconnects."""
+
+    def __init__(
+        self,
+        shutdown_callback: Any,
+        *,
+        enabled: bool,
+        disconnect_grace_seconds: float = 10.0,
+        stale_after_seconds: float = 75.0,
+        poll_seconds: float = 1.0,
+    ) -> None:
+        self.enabled = enabled
+        self._shutdown_callback = shutdown_callback
+        self._disconnect_grace_seconds = disconnect_grace_seconds
+        self._stale_after_seconds = stale_after_seconds
+        self._poll_seconds = poll_seconds
+        self._clients: dict[str, float] = {}
+        self._seen_client = False
+        self._empty_since: Optional[float] = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        if not self.enabled or self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._monitor, name="HustleNestBrowserLifecycle", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=max(2.0, self._poll_seconds * 2))
+
+    def connect(self, client_id: str) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
+            self._seen_client = True
+            self._clients[client_id] = time.monotonic()
+            self._empty_since = None
+
+    def disconnect(self, client_id: str) -> None:
+        if not self.enabled:
+            return
+        with self._lock:
+            self._clients.pop(client_id, None)
+            if self._seen_client and not self._clients and self._empty_since is None:
+                self._empty_since = time.monotonic()
+
+    def _monitor(self) -> None:
+        while not self._stop.wait(self._poll_seconds):
+            now = time.monotonic()
+            should_shutdown = False
+            with self._lock:
+                stale = [client_id for client_id, heartbeat in self._clients.items() if now - heartbeat >= self._stale_after_seconds]
+                for client_id in stale:
+                    self._clients.pop(client_id, None)
+                if self._seen_client and not self._clients:
+                    if self._empty_since is None:
+                        self._empty_since = now
+                    should_shutdown = now - self._empty_since >= self._disconnect_grace_seconds
+            if should_shutdown:
+                LOGGER.info("Final browser client disconnected; stopping HustleNest.")
+                self._shutdown_callback()
+                return
+
+
+def run(
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    browser_url: Optional[str] = None,
+    *,
+    shutdown_on_client_disconnect: bool = False,
+    client_disconnect_grace_seconds: float = 10.0,
+) -> None:
     initialize()
     order_service.ensure_invoice_runtime()
     server = ThreadingHTTPServer((host, port), BridgeRequestHandler)
+    lifecycle = BrowserClientLifecycle(
+        server.shutdown,
+        enabled=shutdown_on_client_disconnect,
+        disconnect_grace_seconds=client_disconnect_grace_seconds,
+    )
+    setattr(server, "client_lifecycle", lifecycle)
+    lifecycle.start()
     backup_stop = threading.Event()
     backup_thread = threading.Thread(target=_browser_backup_worker, args=(backup_stop,), name="HustleNestBackup", daemon=True)
     backup_thread.start()
@@ -4435,6 +4532,7 @@ def run(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, browser_url: Optiona
         pass
     finally:
         backup_stop.set()
+        lifecycle.stop()
         server.server_close()
 
 
@@ -4444,9 +4542,10 @@ def main() -> None:
     parser.add_argument("--port", default=DEFAULT_PORT, type=int)
     parser.add_argument("--launch-browser", action="store_true", help="Open the configured browser after startup.")
     parser.add_argument("--browser-url", default="http://localhost:3000", help="Browser workspace URL to open.")
+    parser.add_argument("--shutdown-on-client-disconnect", action="store_true", help="Stop after the final browser workspace disconnects.")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    run(args.host, args.port, args.browser_url if args.launch_browser else None)
+    run(args.host, args.port, args.browser_url if args.launch_browser else None, shutdown_on_client_disconnect=args.shutdown_on_client_disconnect)
 
 
 if __name__ == "__main__":

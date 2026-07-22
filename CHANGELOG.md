@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.2.1] - 2026-07-22
+
+### Fixed
+- The packaged launcher now closes its Python backend, embedded browser server, console host, and child processes after the final browser workspace disconnects.
+- Browser refreshes and multiple open HustleNest tabs are tolerated so active work does not trigger an accidental shutdown.
+- Abrupt browser termination is detected through heartbeat expiration when an explicit disconnect cannot be delivered.
+
 ## [4.2] - 2026-07-22
 
 ### Added

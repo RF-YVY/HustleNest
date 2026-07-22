@@ -288,6 +288,31 @@ export default function HustleNestWorkspace() {
   const [settingsDirty, setSettingsDirty] = useState(false);
 
   useEffect(() => {
+    const clientId = typeof window.crypto.randomUUID === "function" ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const payload = () => JSON.stringify({ client_id: clientId });
+    const signal = (action: "connect" | "heartbeat") => fetch(`${bridgeUrl}/api/client/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload(),
+      keepalive: true,
+    }).catch(() => undefined);
+    const disconnect = () => {
+      const url = `${bridgeUrl}/api/client/disconnect`;
+      const body = payload();
+      if (navigator.sendBeacon) navigator.sendBeacon(url, new Blob([body], { type: "text/plain;charset=UTF-8" }));
+      else void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true }).catch(() => undefined);
+    };
+    void signal("connect");
+    const heartbeat = window.setInterval(() => void signal("heartbeat"), 5000);
+    window.addEventListener("pagehide", disconnect);
+    return () => {
+      window.clearInterval(heartbeat);
+      window.removeEventListener("pagehide", disconnect);
+      disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
 
     Promise.all([

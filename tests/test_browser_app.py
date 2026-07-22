@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import urllib.request
@@ -16,6 +17,47 @@ from hustlenest import browser_app
 
 
 class BrowserAppLauncherTests(unittest.TestCase):
+    def test_browser_client_lifecycle_stops_after_final_disconnect(self) -> None:
+        shutdown = threading.Event()
+        lifecycle = browser_app.web_bridge.BrowserClientLifecycle(
+            shutdown.set,
+            enabled=True,
+            disconnect_grace_seconds=0.04,
+            stale_after_seconds=1,
+            poll_seconds=0.01,
+        )
+        lifecycle.start()
+        try:
+            lifecycle.connect("first-tab")
+            lifecycle.disconnect("first-tab")
+            self.assertTrue(shutdown.wait(0.5))
+        finally:
+            lifecycle.stop()
+
+    def test_browser_client_lifecycle_tolerates_refresh_and_multiple_tabs(self) -> None:
+        shutdown = threading.Event()
+        lifecycle = browser_app.web_bridge.BrowserClientLifecycle(
+            shutdown.set,
+            enabled=True,
+            disconnect_grace_seconds=0.08,
+            stale_after_seconds=1,
+            poll_seconds=0.01,
+        )
+        lifecycle.start()
+        try:
+            lifecycle.connect("first-tab")
+            lifecycle.connect("second-tab")
+            lifecycle.disconnect("first-tab")
+            self.assertFalse(shutdown.wait(0.12))
+            lifecycle.disconnect("second-tab")
+            time.sleep(0.03)
+            lifecycle.connect("refreshed-tab")
+            self.assertFalse(shutdown.wait(0.12))
+            lifecycle.disconnect("refreshed-tab")
+            self.assertTrue(shutdown.wait(0.5))
+        finally:
+            lifecycle.stop()
+
     def test_bundled_runtime_is_preferred_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"
@@ -60,7 +102,12 @@ class BrowserAppLauncherTests(unittest.TestCase):
                 ["node.exe", str(web.resolve() / "start-local.mjs"), "-H", "127.0.0.1", "-p", "3010"],
             )
             wait.assert_called_once_with(process, "127.0.0.1", 3010)
-            backend.assert_called_once_with("127.0.0.1", 8877, "http://localhost:3010")
+            backend.assert_called_once_with(
+                "127.0.0.1",
+                8877,
+                "http://localhost:3010",
+                shutdown_on_client_disconnect=True,
+            )
             stop.assert_called_once_with(process, 3010)
 
     def test_run_requires_a_production_browser_build(self) -> None:

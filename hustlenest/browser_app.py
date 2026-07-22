@@ -117,7 +117,12 @@ def run(
     try:
         _wait_for_frontend(frontend, frontend_host, frontend_port)
         browser_host = "localhost" if frontend_host in {"127.0.0.1", "0.0.0.0"} else frontend_host
-        web_bridge.run(backend_host, backend_port, f"http://{browser_host}:{frontend_port}" if launch_browser else None)
+        web_bridge.run(
+            backend_host,
+            backend_port,
+            f"http://{browser_host}:{frontend_port}" if launch_browser else None,
+            shutdown_on_client_disconnect=True,
+        )
     finally:
         _stop_frontend(frontend, frontend_port)
 

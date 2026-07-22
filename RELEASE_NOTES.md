@@ -1,24 +1,20 @@
-# HustleNest v4.2
+# HustleNest v4.2.1
 
 **Release date:** July 22, 2026
 
-HustleNest v4.2 makes the browser workspace easier to personalize, safer to operate, and more complete from quote through payment and fulfillment.
+HustleNest v4.2.1 is a lifecycle maintenance release for the Windows application.
 
 ## Highlights
 
-- Review database integrity, backup readiness, configuration, and record quality in the new Data Health Center.
-- Create customer quotes with expiration dates, deposits, partial payments, balances, and reusable order templates.
-- Personalize Home with dashboard presets, section ordering, visibility, and collapsed states.
-- Find settings instantly with searchable quick jumps and launch common workflows through the command palette.
-- Use the enhanced Glass theme with optimized custom backgrounds and automatic readability guidance.
+- Closing the final HustleNest browser workspace now shuts down the local Python backend and embedded web server.
+- The launcher cleans up its Node.js child process before exiting, preventing HustleNest from remaining in Windows Processes.
+- Ordinary browser refreshes and multiple open HustleNest tabs are handled without prematurely stopping the application.
+- A heartbeat fallback closes orphaned processes after an abrupt browser termination.
 
 ## Fixes
 
-- Dashboard and Orders now agree on active open-order counts.
-- Built-in and custom theme backgrounds apply reliably and persist per theme.
-- Quotes and drafts do not reserve inventory or inflate revenue, tax, profit, or fulfillment totals.
-- Imports create a safety backup before committing records.
-- Unsaved settings changes are guarded and editable settings receive inline validation.
+- Fixed the packaged launcher continuing to run after its browser window was closed.
+- Fixed the command prompt and embedded web-server process remaining alive after the user finished using HustleNest.
 
 ## Install or upgrade
 
@@ -32,4 +28,4 @@ Existing databases and saved preferences remain in `%LOCALAPPDATA%\HustleNest`. 
 
 ## Installer verification
 
-`HustleNestSetup.exe` SHA-256: `2D63275B8BBA203749D3FDCA1329D5E10A8E05B7BAF91EDAEFC2EC25A5922783`
+`HustleNestSetup.exe` SHA-256: `DAA567006F9A12713DECDB2A9FD9A4512462E3FFD47965FE98C42BAF3558C3B2`
