@@ -182,6 +182,17 @@ def initialize() -> None:
             CREATE INDEX IF NOT EXISTS idx_order_history_created_at
             ON order_history(created_at);
 
+            CREATE TABLE IF NOT EXISTS order_workflow (
+                order_id INTEGER PRIMARY KEY,
+                record_type TEXT NOT NULL DEFAULT 'order',
+                amount_paid REAL NOT NULL DEFAULT 0,
+                deposit_required REAL NOT NULL DEFAULT 0,
+                quote_expires TEXT,
+                template_name TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS vendors (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,

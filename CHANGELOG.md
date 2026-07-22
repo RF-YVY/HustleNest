@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.2] - 2026-07-22
+
+### Added
+- Data Health Center with database, backup, configuration, document, inventory, and record-quality checks plus privacy-safe diagnostics export.
+- Quotes, quote expiration, required deposits, partial-payment balances, reusable order templates, and per-order profit estimates.
+- Searchable Settings quick jumps, direct Dashboard layout controls, dashboard presets, section ordering, and command-palette actions.
+- Automatic safety backups before imports and audit events for important settings, backup, restore, and import operations.
+- Application update checking from the About settings pane.
+
+### Changed
+- Glass surfaces, background handling, and default body text contrast are stronger and easier to read at normal text size.
+- Custom backgrounds are optimized to WebP, remember per-theme framing, and offer contrast recommendations for bright images.
+- Dashboard sections can be shown, hidden, collapsed, and reordered from a dedicated customization destination.
+- Customer follow-up priorities now include repeat-order opportunities.
+
+### Fixed
+- Unified open-order metrics so dashboard and Orders views use the same fulfillment rules.
+- Built-in and uploaded theme backgrounds now apply through the browser backend and visibly update the workspace.
+- Quotes and drafts no longer reserve inventory or count toward revenue, tax, profit, or active fulfillment totals.
+- Cancelling a quote no longer restores inventory that was never allocated.
+
 ## [4.1] - 2026-07-20
 
 ### Added

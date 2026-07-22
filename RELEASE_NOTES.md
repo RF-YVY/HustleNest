@@ -1,23 +1,24 @@
-# HustleNest v4.1
+# HustleNest v4.2
 
-**Release date:** July 20, 2026
+**Release date:** July 22, 2026
 
-HustleNest v4.1 connects product costing, material inventory, expenses, and quarterly reporting into a more complete operating workflow while preserving existing local data.
+HustleNest v4.2 makes the browser workspace easier to personalize, safer to operate, and more complete from quote through payment and fulfillment.
 
 ## Highlights
 
-- Link products to the materials and quantities they use.
-- Choose Direct material to include a link in product totals, future-order profit snapshots, margins, and inventory valuation, or Track only to record usage without adding cost.
-- Link supply expenses directly to the affected material.
-- Use standardized material units such as each, box, pack, case, roll, pound, and gallon.
-- Report the last quarter or any custom start/end date and export that same reporting window.
-- Keep cancelled and older orders visible without the previous list truncation.
+- Review database integrity, backup readiness, configuration, and record quality in the new Data Health Center.
+- Create customer quotes with expiration dates, deposits, partial payments, balances, and reusable order templates.
+- Personalize Home with dashboard presets, section ordering, visibility, and collapsed states.
+- Find settings instantly with searchable quick jumps and launch common workflows through the command palette.
+- Use the enhanced Glass theme with optimized custom backgrounds and automatic readability guidance.
 
 ## Fixes
 
-- Product fields and recipes now save as one transaction, preventing partial updates.
-- Report drill-downs show every order in the selected period instead of only the first eight.
-- Product catalogs with more than 100 records remain available in browser lists and order entry.
+- Dashboard and Orders now agree on active open-order counts.
+- Built-in and custom theme backgrounds apply reliably and persist per theme.
+- Quotes and drafts do not reserve inventory or inflate revenue, tax, profit, or fulfillment totals.
+- Imports create a safety backup before committing records.
+- Unsaved settings changes are guarded and editable settings receive inline validation.
 
 ## Install or upgrade
 
@@ -31,4 +32,4 @@ Existing databases and saved preferences remain in `%LOCALAPPDATA%\HustleNest`. 
 
 ## Installer verification
 
-`HustleNestSetup.exe` SHA-256: `19ED64F51516244B4D8B28423022F3855FE33233BCAD0413A82F5D092A1A7C7D`
+`HustleNestSetup.exe` SHA-256: `2D63275B8BBA203749D3FDCA1329D5E10A8E05B7BAF91EDAEFC2EC25A5922783`

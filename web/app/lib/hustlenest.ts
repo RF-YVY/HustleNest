@@ -12,7 +12,7 @@ export type OrderActivity = {
   order_available: boolean;
 };
 
-export type OrderStatus = "Received" | "Paid" | "Processing" | "Ready to Ship" | "Shipped" | "Cancelled";
+export type OrderStatus = "Quote" | "Draft" | "Awaiting Payment" | "Received" | "Paid" | "Processing" | "Ready to Ship" | "Shipped" | "Cancelled";
 
 export type Order = {
   id: number;
@@ -32,8 +32,17 @@ export type Order = {
   total: number;
   subtotal?: number;
   taxAmount?: number;
+  totalCost?: number;
+  profit?: number;
+  profitMargin?: number;
   status: OrderStatus;
   paid: boolean;
+  recordType?: "order" | "quote";
+  amountPaid?: number;
+  depositRequired?: number;
+  balanceDue?: number;
+  quoteExpires?: string | null;
+  templateName?: string;
   items: Array<{
     productId?: number | null;
     sku?: string;
@@ -58,9 +67,18 @@ export type BridgeOrder = {
   target_completion_date: string | null;
   status: OrderStatus;
   payment_status: "paid" | "unpaid" | "partial";
+  record_type: "order" | "quote";
+  amount_paid: string;
+  deposit_required: string;
+  balance_due: string;
+  quote_expires: string | null;
+  template_name: string;
   subtotal: string;
   tax_amount: string;
   total: string;
+  total_cost: string;
+  profit: string;
+  profit_margin: number;
   attention_reasons: string[];
   items: Array<{
     product_id: number | null;
@@ -81,6 +99,7 @@ export type OrderMetrics = {
   awaiting_payment_count: number;
   ready_to_ship: number;
   needs_attention: number;
+  open_quotes: number;
 };
 
 export type BridgeState = "connecting" | "connected" | "demo" | "error";
@@ -338,7 +357,18 @@ export type DocumentsWorkspaceData = {
 export type SettingsWorkspaceData = {
   profile: { display_name: string; role: string; email: string; initials: string; avatar_configured: boolean; avatar_available: boolean };
   business: { name: string; home_location: string; show_name_on_dashboard: boolean; logo_configured: boolean; logo_available: boolean; logo_alignment: string; logo_size: number };
-  appearance: { theme: "light" | "dark" | "minty" | "solar" | "mission-control" | "glass"; text_scale: number; logo_alignment: "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right"; logo_size: number; dashboard_sections: Array<{ key: string; label: string; visible: boolean; collapsed: boolean }> };
+  appearance: {
+    theme: "light" | "dark" | "minty" | "solar" | "mission-control" | "glass";
+    text_scale: number;
+    glass_intensity: "subtle" | "balanced" | "vivid";
+    reduce_transparency: boolean;
+    reduce_motion: boolean;
+    backgrounds: Record<"light" | "dark" | "minty" | "solar" | "mission-control" | "glass", { enabled: boolean; source: "none" | "preset" | "custom"; preset: "aurora" | "nebula" | "prism" | "sunset"; custom_path: string; custom_configured: boolean; custom_available: boolean; fit: "cover" | "contain"; position_x: number; position_y: number; dim: number; tone: "light" | "dark" }>;
+    active_background: { enabled: boolean; source: "none" | "preset" | "custom"; preset: "aurora" | "nebula" | "prism" | "sunset"; custom_path: string; custom_configured: boolean; custom_available: boolean; fit: "cover" | "contain"; position_x: number; position_y: number; dim: number; tone: "light" | "dark" };
+    logo_alignment: "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
+    logo_size: number;
+    dashboard_sections: Array<{ key: string; label: string; visible: boolean; collapsed: boolean; order: number }>;
+  };
   orders: { number_format: string; next_sequence: number; next_number: string; low_inventory_threshold: number };
   invoice: { slogan: string; address: string; street: string; city: string; state: string; zip: string; phone: string; fax: string; terms: string; comments: string; contact_name: string; contact_phone: string; contact_email: string };
   tax: { rate_percent: string; show_on_invoice: boolean; add_to_total: boolean };
@@ -362,9 +392,19 @@ export type TrashWorkspaceData = {
 
 export type BackupWorkspaceData = {
   settings: { enabled: boolean; folder: string; using_managed_folder: boolean; frequency: "daily" | "weekly" | "manual"; max_backups: number; last_backup: string | null };
-  backups: Array<{ id: string; filename: string; created_at: string; size_bytes: number }>;
+  backups: Array<{ id: string; filename: string; created_at: string; size_bytes: number; includes_media: boolean }>;
   summary: { count: number; total_bytes: number };
   revision: string;
+};
+
+export type HealthCenterData = {
+  score: number;
+  status: "healthy" | "attention" | "critical";
+  checked_at: string;
+  issues: Array<{ key: string; severity: "critical" | "warning" | "info"; title: string; detail: string; target_view: WorkspaceView; target_id: number | null; setting_id: string }>;
+  metrics: { critical: number; warnings: number; informational: number; open_orders: number; records_checked: number };
+  backup: { healthy: boolean; enabled: boolean; frequency: string; last_success: string | null; age_days: number | null; available_count: number };
+  database: { integrity: string; journal_mode: string; location: string };
 };
 
 export type ImportPreviewData = {
@@ -383,6 +423,7 @@ export type ImportResultData = {
   errors: string[];
   warnings: string[];
   messages_truncated: boolean;
+  safety_backup: string;
 };
 
 export type CloudSyncWorkspaceData = {
@@ -456,6 +497,7 @@ export type OrderOptions = {
   tax_rate_percent: string;
   tax_add_to_total: boolean;
   next_order_number: string;
+  templates: Array<{ name: string; items: Array<{ product_id: number; quantity: number; unit_price: string }>; notes: string; deposit_required: string; created_at: string }>;
 };
 
 export const bridgeUrl = process.env.NEXT_PUBLIC_HUSTLENEST_API_URL ?? "http://127.0.0.1:8765";

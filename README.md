@@ -1,6 +1,6 @@
 # HustleNest
 
-Version: **v4.1**
+Version: **v4.2**
 
 HustleNest is a local-first business workspace with a browser interface and a Python backend. It brings orders, customers, inventory, vendors, finance, reports, documents, and settings into one smooth workflow while keeping business data in a local SQLite database.
 
@@ -15,14 +15,14 @@ HustleNest is a local-first business workspace with a browser interface and a Py
 - Interactive sales geography with all shipped destinations shown together on an OpenStreetMap view.
 - Configurable browser launch behavior: system default, a selected work browser, or manual opening.
 
-## What's New in 4.0
+## What's New in 4.2
 
-- **Browser-first application**: The Windows launcher now starts the production browser workspace and local backend together.
-- **Complete workflow migration**: Core sales, CRM, inventory, finance, reporting, document, trash, backup, import, cloud-sync, and settings workflows are available in the browser.
-- **Refined appearance**: Light, Dark, Minty, Solar, Mission Control, and Glass themes plus application-wide text scaling.
-- **Business identity controls**: Edit the owner profile, avatar, business details, and logo directly in Settings.
-- **Destination map**: View every shipped destination at once, with market summaries and direct order navigation.
-- **Data completeness and reliability**: Historical order-only customers remain visible, stale edits are guarded, and material creation no longer fails with the `12 values for 13 columns` database error.
+- **Safer operations**: A Data Health Center checks backups, database integrity, configuration, and record quality, with privacy-safe diagnostics and automatic pre-import backups.
+- **Expanded sales workflow**: Quotes, deposits, partial payments, balances, quote expiration, and reusable order templates now share the order workspace.
+- **Accurate financials**: Quotes and drafts stay out of inventory allocation, revenue, tax, and profit until converted into active orders.
+- **Personalized workspace**: Dashboard presets, section ordering, show/hide and collapse controls, settings quick jumps, and command-palette actions make common work faster.
+- **Improved appearance**: The Glass theme has stronger depth, custom per-theme backgrounds, automatic image optimization, and readability safeguards for bright images.
+- **Guardrails and traceability**: Unsaved-change warnings, inline validation, audit events, update checking, and safer backup/restore feedback reduce preventable mistakes.
 
 ## Installation
 

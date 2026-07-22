@@ -191,6 +191,9 @@ class OrdersBridgeTests(unittest.TestCase):
         _, metrics = self.application.dispatch("GET", "/api/orders/metrics")
         self.assertEqual(metrics["open_orders"], 0)
         self.assertEqual(metrics["awaiting_payment_count"], 0)
+        _, home = self.application.dispatch("GET", "/api/home")
+        self.assertEqual(home["metrics"]["open_orders"], 0)
+        self.assertNotIn("order", {item["kind"] for item in home["priorities"]})
         _, all_orders = self.application.dispatch("GET", "/api/orders?limit=10")
         self.assertEqual(all_orders[0]["status"], "Cancelled")
 
@@ -240,6 +243,50 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertEqual(updated["payment_status"], "paid")
         self.assertEqual(updated["notes"], "Updated in browser test")
         self.assertEqual(product_repository.get_product_by_id(self.product.id).inventory_count, 7)
+
+    def test_quotes_deposits_templates_and_health_center(self) -> None:
+        inventory_before = product_repository.get_product_by_id(self.product.id).inventory_count
+        quote_draft = {
+            "record_type": "quote",
+            "customer": {"name": "Quote Customer", "address": "10 Market Street, Austin, TX 78701"},
+            "order_date": date.today().isoformat(),
+            "quote_expires": (date.today() + timedelta(days=14)).isoformat(),
+            "status": "Quote",
+            "payment_status": "unpaid",
+            "amount_paid": "0",
+            "deposit_required": "10.00",
+            "items": [{"product_id": self.product.id, "quantity": 2, "unit_price": "15.00"}],
+        }
+        status, quote = self.application.dispatch("POST", "/api/orders", quote_draft)
+        self.assertEqual(status, HTTPStatus.CREATED)
+        self.assertEqual(quote["record_type"], "quote")
+        self.assertEqual(quote["status"], "Quote")
+        self.assertEqual(quote["deposit_required"], "10.00")
+        self.assertEqual(quote["balance_due"], "30.00")
+        self.assertEqual(product_repository.get_product_by_id(self.product.id).inventory_count, inventory_before)
+
+        _, metrics = self.application.dispatch("GET", "/api/orders/metrics")
+        self.assertEqual(metrics["open_quotes"], 1)
+        converted_status, converted = self.application.dispatch("POST", f"/api/orders/{quote['id']}/advance", {"expected_status": "Quote"})
+        self.assertEqual(converted_status, HTTPStatus.OK)
+        self.assertEqual(converted["record_type"], "order")
+        self.assertEqual(converted["status"], "Received")
+        self.assertEqual(product_repository.get_product_by_id(self.product.id).inventory_count, inventory_before - 2)
+
+        template_status, templates = self.application.dispatch("POST", "/api/order-templates", {"name": "Two hats", "items": quote_draft["items"], "deposit_required": "10", "notes": "Reusable quote"})
+        self.assertEqual(template_status, HTTPStatus.CREATED)
+        self.assertEqual(templates[0]["name"], "Two hats")
+        _, options = self.application.dispatch("GET", "/api/order-options")
+        self.assertEqual(options["templates"][0]["items"][0]["quantity"], 2)
+
+        health_status, health = self.application.dispatch("GET", "/api/health-center")
+        self.assertEqual(health_status, HTTPStatus.OK)
+        self.assertEqual(health["database"]["integrity"], "ok")
+        diagnostics_status, diagnostics = self.application.dispatch("GET", "/api/diagnostics/export")
+        self.assertEqual(diagnostics_status, HTTPStatus.OK)
+        self.assertIsInstance(diagnostics, BinaryDownload)
+        self.assertNotIn(b"Quote Customer", diagnostics.content)
+        self.assertIn(b'"credentials_included": false', diagnostics.content)
 
     def test_create_validation_returns_stable_field_codes(self) -> None:
         with self.assertRaises(BridgeError) as raised:
@@ -915,12 +962,15 @@ class OrdersBridgeTests(unittest.TestCase):
             {
                 "section": "appearance",
                 "expected_revision": initial["summary"]["revision"],
-                "values": {"theme": "mission-control", "text_scale": 1.25, "logo_alignment": "bottom-right", "logo_size": 240, "dashboard_sections": sections},
+                "values": {"theme": "mission-control", "text_scale": 1.25, "glass_intensity": "vivid", "reduce_transparency": True, "reduce_motion": True, "logo_alignment": "bottom-right", "logo_size": 240, "dashboard_sections": sections},
             },
         )
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(updated["appearance"]["theme"], "mission-control")
         self.assertEqual(updated["appearance"]["text_scale"], 1.25)
+        self.assertEqual(updated["appearance"]["glass_intensity"], "vivid")
+        self.assertTrue(updated["appearance"]["reduce_transparency"])
+        self.assertTrue(updated["appearance"]["reduce_motion"])
         self.assertEqual(settings_repository.get_setting("browser_text_scale"), "1.25")
         self.assertEqual(updated["appearance"]["logo_alignment"], "bottom-right")
         self.assertFalse(next(item for item in updated["appearance"]["dashboard_sections"] if item["key"] == "notifications")["visible"])
@@ -933,11 +983,45 @@ class OrdersBridgeTests(unittest.TestCase):
             )
         self.assertEqual(invalid_text_size.exception.fields["text_scale"], "invalid_choice")
 
+        background_image = b"\x89PNG\r\n\x1a\nmanaged-workspace-background"
+        background_status, background_settings = self.application.dispatch(
+            "POST",
+            "/api/settings/background",
+            {"expected_revision": updated["summary"]["revision"], "theme": "mission-control", "tone": "light", "file": {"name": "workspace.png", "content_base64": base64.b64encode(background_image).decode("ascii")}},
+        )
+        self.assertEqual(background_status, HTTPStatus.OK)
+        active_background = background_settings["appearance"]["active_background"]
+        self.assertTrue(active_background["custom_available"])
+        self.assertEqual(active_background["tone"], "light")
+        background_path = active_background["custom_path"]
+        self.assertFalse(Path(background_path).is_absolute())
+        background_download_status, background_download = self.application.dispatch("GET", "/api/settings/background?theme=mission-control")
+        self.assertEqual(background_download_status, HTTPStatus.OK)
+        self.assertEqual(background_download.content, background_image)
+        backgrounds = background_settings["appearance"]["backgrounds"]
+        backgrounds["mission-control"].update({"enabled": True, "source": "preset", "preset": "nebula", "fit": "contain", "position_x": 72, "position_y": 31, "dim": 61})
+        _, adjusted_background = self.application.dispatch(
+            "PUT",
+            "/api/settings",
+            {"section": "appearance", "expected_revision": background_settings["summary"]["revision"], "values": {"backgrounds": backgrounds}},
+        )
+        mission_background = adjusted_background["appearance"]["backgrounds"]["mission-control"]
+        self.assertEqual((mission_background["source"], mission_background["preset"], mission_background["fit"]), ("preset", "nebula", "contain"))
+        self.assertEqual((mission_background["position_x"], mission_background["position_y"], mission_background["dim"]), (72, 31, 61))
+        self.assertTrue(mission_background["custom_configured"])
+        _, background_cleared = self.application.dispatch(
+            "DELETE",
+            "/api/settings/background",
+            {"expected_revision": adjusted_background["summary"]["revision"], "theme": "mission-control"},
+        )
+        self.assertFalse(background_cleared["appearance"]["active_background"]["custom_configured"])
+        self.assertFalse((Path(self.storage.name) / "HustleNest" / background_path).exists())
+
         image = b"\x89PNG\r\n\x1a\nmanaged-brand-logo"
         logo_status, branded = self.application.dispatch(
             "POST",
             "/api/settings/logo",
-            {"expected_revision": updated["summary"]["revision"], "file": {"name": "brand.jpg", "content_base64": base64.b64encode(image).decode("ascii")}},
+            {"expected_revision": background_cleared["summary"]["revision"], "file": {"name": "brand.jpg", "content_base64": base64.b64encode(image).decode("ascii")}},
         )
         self.assertEqual(logo_status, HTTPStatus.OK)
         self.assertTrue(branded["business"]["logo_available"])
@@ -1158,10 +1242,15 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertEqual(settings_status, HTTPStatus.OK)
         self.assertTrue(configured["settings"]["using_managed_folder"])
 
+        managed_background = Path(self.storage.name) / "HustleNest" / "media" / "backgrounds" / "backup-theme.webp"
+        managed_background.parent.mkdir(parents=True, exist_ok=True)
+        managed_background.write_bytes(b"RIFF\x00\x00\x00\x00WEBPbackup-theme")
+
         backup_status, created = self.application.dispatch("POST", "/api/backups", {"expected_revision": configured["revision"]})
         self.assertEqual(backup_status, HTTPStatus.CREATED)
         self.assertEqual(created["summary"]["count"], 1)
         backup = created["backups"][0]
+        self.assertTrue(backup["includes_media"])
         download_status, download = self.application.dispatch("GET", f"/api/backups/{backup['id']}/download")
         self.assertEqual(download_status, HTTPStatus.OK)
         self.assertIsInstance(download, BinaryDownload)
@@ -1175,6 +1264,7 @@ class OrdersBridgeTests(unittest.TestCase):
             self.assertIn("material_id", {row[1] for row in check.execute("PRAGMA table_info(expenses)").fetchall()})
 
         settings_repository.set_setting("business_name", "Changed after backup")
+        managed_background.unlink()
         with self.assertRaises(BridgeError) as confirmation:
             self.application.dispatch(
                 "POST", f"/api/backups/{backup['id']}/restore", {"expected_revision": created["revision"], "confirmation": "RESTORE"}
@@ -1189,6 +1279,7 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertEqual(restore_status, HTTPStatus.OK)
         self.assertTrue(restored["restart_required"])
         self.assertNotEqual(settings_repository.get_setting("business_name"), "Changed after backup")
+        self.assertEqual(managed_background.read_bytes(), b"RIFF\x00\x00\x00\x00WEBPbackup-theme")
 
     def test_initialize_upgrades_a_v4_database_without_losing_records(self) -> None:
         close_database_for_replacement()

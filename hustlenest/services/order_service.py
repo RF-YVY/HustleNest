@@ -1051,7 +1051,7 @@ def _render_tax_summary_html(
     """
 
 
-def export_order_invoice(order_id: int, destination: str) -> Path:
+def export_order_invoice(order_id: int, destination: str, *, document_title: Optional[str] = None) -> Path:
     order = order_repository.fetch_order(int(order_id))
     if order is None:
         raise ValueError("Order not found.")
@@ -1063,12 +1063,12 @@ def export_order_invoice(order_id: int, destination: str) -> Path:
     if not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    html_content = _render_invoice_html(order, settings)
+    html_content = _render_invoice_html(order, settings, document_title=document_title)
     _write_pdf_from_html(html_content, path)
     return path
 
 
-def _render_invoice_html(order: Order, settings: AppSettings) -> str:
+def _render_invoice_html(order: Order, settings: AppSettings, *, document_title: Optional[str] = None) -> str:
     business_name = (settings.business_name or "").strip() or "Company Name"
     slogan = (settings.invoice_slogan or "Your Company Slogan").strip() or "Your Company Slogan"
     street = (settings.invoice_street or "Street Address").strip() or "Street Address"
@@ -1129,7 +1129,7 @@ def _render_invoice_html(order: Order, settings: AppSettings) -> str:
     ship_block = customer_block
 
     invoice_date = order.order_date.strftime("%B %d, %Y") if order.order_date else "DATE"
-    document_title = "Receipt" if order.is_paid else "Invoice"
+    document_title = (document_title or ("Receipt" if order.is_paid else "Invoice")).strip()
 
     terms_value = (settings.invoice_terms or "Due on receipt").strip() or "Due on receipt"
 

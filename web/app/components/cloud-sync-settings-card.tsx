@@ -49,7 +49,7 @@ export function CloudSyncSettingsCard({ onChanged }: { onChanged: () => void }) 
   const runPull = async () => { if (!data) return; const success = await request("/api/sync-settings/pull", { expected_revision: data.revision, confirmation }, "Cloud data checked."); if (success) { setPullOpen(false); setConfirmation(""); } };
 
   return <>
-    <article className="settings-card cloud-sync-settings-card">
+    <article className="settings-card cloud-sync-settings-card" id="settings-cloud-sync">
       <div className="settings-card-heading"><span className="setting-icon"><Cloud size={19} /></span><div><h2>Cloud sync</h2><p>Masked provider setup and guarded database transfers</p></div><button className="secondary-button setting-save" onClick={() => void save()} disabled={!data || Boolean(working) || restartRequired}><Save size={14} />{working === "/api/sync-settings" ? "Saving…" : "Save"}</button></div>
       {restartRequired ? <div className="backup-restart"><ShieldAlert size={18} /><div><strong>Restart required</strong><span>Cloud data replaced the local database. Restart the backend before continuing.</span></div></div> : null}
       {message ? <div className={`settings-feedback ${message.tone}`} role="status">{message.tone === "success" ? <Check size={15} /> : <ShieldAlert size={15} />}{message.text}</div> : null}

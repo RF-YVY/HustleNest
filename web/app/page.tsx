@@ -3,6 +3,7 @@
 import {
   ArrowUpRight,
   BadgeDollarSign,
+  BookmarkPlus,
   Ban,
   Bell,
   CalendarDays,
@@ -31,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { AppNavigation } from "./components/app-navigation";
 import { CustomersWorkspace } from "./components/customers-workspace";
 import { DocumentsWorkspace } from "./components/documents-workspace";
@@ -165,7 +167,7 @@ const initialOrders: Order[] = [
   },
 ];
 
-const stages: OrderStatus[] = ["Received", "Paid", "Processing", "Ready to Ship", "Shipped"];
+const stages: OrderStatus[] = ["Quote", "Draft", "Awaiting Payment", "Received", "Paid", "Processing", "Ready to Ship", "Shipped"];
 const filters = ["All orders", "Open", "Overdue", "Unpaid", "Ready to ship"];
 
 function currency(value: number) {
@@ -219,8 +221,17 @@ function mapBridgeOrder(order: BridgeOrder): Order {
     total: Number(order.total),
     subtotal: Number(order.subtotal),
     taxAmount: Number(order.tax_amount),
+    totalCost: Number(order.total_cost),
+    profit: Number(order.profit),
+    profitMargin: order.profit_margin,
     status: order.status,
     paid: order.payment_status === "paid",
+    recordType: order.record_type,
+    amountPaid: Number(order.amount_paid),
+    depositRequired: Number(order.deposit_required),
+    balanceDue: Number(order.balance_due),
+    quoteExpires: order.quote_expires,
+    templateName: order.template_name,
     items: order.items.map((item) => ({
       productId: item.product_id,
       sku: item.sku,
@@ -274,6 +285,7 @@ export default function HustleNestWorkspace() {
   const [cancelCandidate, setCancelCandidate] = useState<Order | null>(null);
   const [trashCandidate, setTrashCandidate] = useState<{ type: "order"; record: Order } | { type: "product"; record: ProductOption } | null>(null);
   const [trashWorking, setTrashWorking] = useState(false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -367,6 +379,13 @@ export default function HustleNestWorkspace() {
       searchText: [title, subtitle, ...terms].join(" ").toLocaleLowerCase(),
     });
     return [
+      result("action", "new-order", "Create a new order", "Start an order from anywhere", ["new order add sale"]),
+      result("action", "quick-add", "Quick add a record", "Customer, product, material, vendor, or expense", ["create customer product material vendor expense"]),
+      result("action", "health", "Open Data Health Center", "Review backups, records, and configuration", ["diagnostics health backup issues"]),
+      result("action", "appearance", "Open Appearance settings", "Themes, backgrounds, dashboard, and accessibility", ["theme glass background dashboard settings"]),
+      result("action", "tax", "Open Tax settings", "Configure checkout and invoice tax behavior", ["sales tax settings"]),
+      result("action", "reports", "Open business reports", "Revenue, profit, tax, and exports", ["profit monthly summary reporting"]),
+      result("action", "backup", "Back up now", "Create a protected local database backup", ["safety recovery database"]),
       ...orders.map((order) => result("order", order.id, order.number, `${order.customer} · ${order.status} · ${currency(order.total)}`, [order.customer, order.location, order.note, ...order.items.map((item) => `${item.sku ?? ""} ${item.name}`)])),
       ...customers.map((customer) => result("customer", customer.key, customer.name, customer.company || customer.email || "Customer", [customer.email, customer.phone, customer.address, customer.notes])),
       ...products.map((product) => result("product", product.id, product.name, `${product.sku} · ${product.inventory_count} in stock`, [product.sku, product.description, product.status])),
@@ -567,7 +586,7 @@ export default function HustleNestWorkspace() {
       setOrders((current) => current.map((item) => item.id === updated.id && item.live ? updated : item));
       setCancelCandidate(null);
       await refreshOrderMetrics();
-      setBridgeMessage(`${updated.number} cancelled and its product inventory restored.`);
+      setBridgeMessage(updated.record_type === "quote" ? `${updated.number} cancelled.` : `${updated.number} cancelled and its product inventory restored.`);
       setReloadKey((value) => value + 1);
     } catch (error: unknown) {
       setBridgeMessage(error instanceof Error ? error.message : "The order could not be cancelled.");
@@ -598,6 +617,22 @@ export default function HustleNestWorkspace() {
   };
 
   const openSearchResult = (result: GlobalSearchResult) => {
+    if (result.kind === "action") {
+      const action = String(result.id);
+      if (action === "new-order") return startOrder();
+      if (action === "quick-add") { setQuickAddOpen(true); return; }
+      if (action === "reports") { setActiveView("reports"); return; }
+      if (action === "health" || action === "appearance" || action === "tax") {
+        const target = action === "health" ? "settings-data-health" : action === "appearance" ? "settings-appearance" : "settings-tax";
+        setActiveView("settings");
+        window.setTimeout(() => { window.location.hash = target; document.getElementById(target)?.scrollIntoView({ behavior: settings?.appearance.reduce_motion ? "auto" : "smooth", block: "start" }); }, 0);
+        return;
+      }
+      if (action === "backup") {
+        void fetch(`${bridgeUrl}/api/backups`).then((response) => response.json()).then((payload: { ok: boolean; data?: { revision: string } }) => payload.data ? fetch(`${bridgeUrl}/api/backups`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: payload.data.revision }) }) : null).then((response) => response?.json()).then((payload: { ok?: boolean; error?: { message: string } } | undefined) => setBridgeMessage(payload?.ok ? "Backup created successfully." : payload?.error?.message || "Backup could not be created."));
+        return;
+      }
+    }
     if (result.kind === "order") return openOrder(Number(result.id));
     if (result.kind === "customer") { setFocusedCustomerKey(String(result.id)); setActiveView("customers"); return; }
     if (result.kind === "product") { setFocusedProductId(Number(result.id)); setActiveView("products"); return; }
@@ -610,6 +645,19 @@ export default function HustleNestWorkspace() {
     }
     setFocusedDocumentId(Number(result.id));
     setActiveView("documents");
+  };
+
+  const openHealthTarget = (view: WorkspaceView, id?: number, settingId?: string) => {
+    if (view === "settings") {
+      setActiveView("settings");
+      if (settingId) window.setTimeout(() => { window.location.hash = settingId; document.getElementById(settingId)?.scrollIntoView({ behavior: settings?.appearance.reduce_motion ? "auto" : "smooth", block: "start" }); }, 0);
+      return;
+    }
+    if (view === "orders" && id) return openOrder(id);
+    if (view === "products" && id) setFocusedProductId(id);
+    if (view === "materials" && id) setFocusedMaterialId(id);
+    if (view === "documents" && id) setFocusedDocumentId(id);
+    setActiveView(view);
   };
 
   const editCustomer = (customer: CustomerOption) => {
@@ -678,11 +726,33 @@ export default function HustleNestWorkspace() {
     setReloadKey((value) => value + 1);
   };
 
+  const activeBackground = settings?.appearance.active_background;
+  const hasBackground = Boolean(activeBackground?.enabled && activeBackground.source !== "none" && (activeBackground.source !== "custom" || activeBackground.custom_available));
+  const backgroundStyle = hasBackground ? {
+    "--custom-background-image": activeBackground?.source === "custom" ? `url("${bridgeUrl}/api/settings/background?theme=${theme}&v=${settings?.summary.revision}")` : "none",
+    "--background-position": `${activeBackground?.position_x ?? 50}% ${activeBackground?.position_y ?? 50}%`,
+    "--background-size": activeBackground?.fit ?? "cover",
+    "--background-dim": String((activeBackground?.dim ?? 38) / 100),
+  } as CSSProperties : undefined;
+  const appearanceClasses = [
+    `app-shell theme-${theme}`,
+    ["dark", "solar", "mission-control", "glass"].includes(theme) ? "dark" : "",
+    hasBackground ? "has-custom-background" : "",
+    hasBackground ? `background-${activeBackground?.source} preset-${activeBackground?.preset} background-tone-${activeBackground?.tone}` : "",
+    `glass-${settings?.appearance.glass_intensity ?? "balanced"}`,
+    settings?.appearance.reduce_transparency ? "reduce-transparency" : "",
+    settings?.appearance.reduce_motion ? "reduce-motion" : "",
+  ].filter(Boolean).join(" ");
+  const navigateWorkspace = (view: WorkspaceView) => {
+    if (activeView === "settings" && view !== "settings" && settingsDirty && !window.confirm("You have unsaved settings changes. Leave without saving them?")) return;
+    setActiveView(view);
+  };
+
   return (
-    <main className={`app-shell theme-${theme} ${["dark", "solar", "mission-control"].includes(theme) ? "dark" : ""}`}>
+    <main className={appearanceClasses} style={backgroundStyle}>
       <AppNavigation
         activeView={activeView}
-        onNavigate={setActiveView}
+        onNavigate={navigateWorkspace}
         orderCount={openCount}
         customerCount={customers.length}
         productCount={products.length}
@@ -708,7 +778,7 @@ export default function HustleNestWorkspace() {
               {bridgeState === "connected" ? "Local data connected" : bridgeState === "connecting" ? "Connecting…" : "Demo data"}
             </span>
             <button className="icon-button" aria-label="Toggle theme" onClick={() => void toggleTheme()}>
-              {["dark", "solar", "mission-control"].includes(theme) ? <Sun size={19} /> : <Moon size={19} />}
+              {["dark", "solar", "mission-control", "glass"].includes(theme) ? <Sun size={19} /> : <Moon size={19} />}
             </button>
             <button className="icon-button notification-button" aria-label="Open priorities and notifications" onClick={() => setActiveView("home")}>
               <Bell size={19} />
@@ -724,7 +794,7 @@ export default function HustleNestWorkspace() {
         </header>
 
         {activeView === "home" ? (
-          <HomeWorkspace home={home} onNavigate={setActiveView} onOpenOrder={openOrder} onOpenMaterial={openMaterial} onNewOrder={() => startOrder()} onManageGoals={() => setGoalPanelOpen(true)} />
+          <HomeWorkspace home={home} onNavigate={setActiveView} onOpenOrder={openOrder} onOpenMaterial={openMaterial} onNewOrder={() => startOrder()} onManageGoals={() => setGoalPanelOpen(true)} dashboardSections={settings?.appearance.dashboard_sections} />
         ) : activeView === "orders" ? (
         <div className="workspace">
           <div className="page-heading">
@@ -733,7 +803,7 @@ export default function HustleNestWorkspace() {
               <h1>Orders</h1>
               <p>Keep every promise, payment, and package moving.</p>
             </div>
-            <button className="secondary-button" onClick={() => void downloadSelectedInvoice()} disabled={!selected.live || lifecycleAction === "invoice"}><FileText size={17} /> {lifecycleAction === "invoice" ? "Generating…" : "Invoice PDF"}</button>
+            <button className="secondary-button" onClick={() => void downloadSelectedInvoice()} disabled={!selected.live || lifecycleAction === "invoice"}><FileText size={17} /> {lifecycleAction === "invoice" ? "Generating…" : selected.recordType === "quote" ? "Quote PDF" : selected.paid ? "Receipt PDF" : "Invoice PDF"}</button>
           </div>
 
           <div className={`bridge-banner bridge-${bridgeState}`} role="status" data-testid="bridge-status">
@@ -826,7 +896,7 @@ export default function HustleNestWorkspace() {
                 <strong>{currency(selected.total)}</strong>
               </div>
 
-              {selected.status === "Cancelled" ? <div className="cancelled-order-callout"><Ban size={17} /><div><strong>Order cancelled</strong><span>Its product inventory has been restored and the order is excluded from active totals.</span></div></div> : <div className="status-track" aria-label="Order progress">
+              {selected.status === "Cancelled" ? <div className="cancelled-order-callout"><Ban size={17} /><div><strong>{selected.recordType === "quote" ? "Quote cancelled" : "Order cancelled"}</strong><span>{selected.recordType === "quote" ? "No inventory was reserved, and the quote is excluded from active totals." : "Its product inventory has been restored and the order is excluded from active totals."}</span></div></div> : <div className="status-track" aria-label="Order progress">
                 {stages.map((stage, index) => {
                   const currentIndex = stages.indexOf(selected.status);
                   const complete = index <= currentIndex;
@@ -874,9 +944,11 @@ export default function HustleNestWorkspace() {
                 <p><span>Subtotal</span><strong>{currency(selected.subtotal ?? selected.total)}</strong></p>
                 <p><span>Tax</span><strong>{currency(selected.taxAmount ?? 0)}</strong></p>
                 <p className="total-line"><span>Total</span><strong>{currency(selected.total)}</strong></p>
+                <p><span>Estimated profit</span><strong>{currency(selected.profit ?? 0)} · {(selected.profitMargin ?? 0).toFixed(1)}%</strong></p>
+                <p><span>Paid / balance</span><strong>{currency(selected.amountPaid ?? 0)} / {currency(selected.balanceDue ?? selected.total)}</strong></p>
                 <p className={selected.paid ? "payment paid" : "payment unpaid"}>
                   {selected.paid ? <CheckCircle2 size={15} /> : <CircleAlert size={15} />}
-                  {selected.paid ? "Paid in full" : "Payment outstanding"}
+                  {selected.paid ? "Paid in full" : (selected.amountPaid ?? 0) > 0 ? "Partial payment recorded" : selected.recordType === "quote" ? "Quote awaiting approval" : "Payment outstanding"}
                 </p>
               </div>
 
@@ -946,7 +1018,7 @@ export default function HustleNestWorkspace() {
         ) : activeView === "trash" ? (
           <TrashWorkspace key={`trash-${reloadKey}`} onChanged={(message) => { setBridgeMessage(message); setReloadKey((value) => value + 1); }} />
         ) : (
-          <SettingsWorkspace key={settings ? "connected-settings" : "loading-settings"} initialSettings={settings} onSettingsUpdated={(updated) => { setSettings(updated); setTheme(updated.appearance.theme); }} />
+          <SettingsWorkspace key={settings ? "connected-settings" : "loading-settings"} initialSettings={settings} onSettingsUpdated={(updated) => { setSettings(updated); setTheme(updated.appearance.theme); }} onNavigate={openHealthTarget} onDirtyChange={setSettingsDirty} />
         )}
       </section>
 
@@ -996,6 +1068,10 @@ function OrderComposer({
   const [targetDate, setTargetDate] = useState(initialOrder?.targetDate ?? "");
   const [status, setStatus] = useState<OrderStatus>(initialOrder?.status ?? "Received");
   const [paymentStatus, setPaymentStatus] = useState(initialOrder?.paid ? "paid" : "unpaid");
+  const [recordType, setRecordType] = useState<"order" | "quote">(initialOrder?.recordType ?? "order");
+  const [amountPaid, setAmountPaid] = useState((initialOrder?.amountPaid ?? 0).toFixed(2));
+  const [depositRequired, setDepositRequired] = useState((initialOrder?.depositRequired ?? 0).toFixed(2));
+  const [quoteExpires, setQuoteExpires] = useState(initialOrder?.quoteExpires ?? "");
   const [carrier, setCarrier] = useState(initialOrder?.carrier ?? "");
   const [trackingNumber, setTrackingNumber] = useState(initialOrder?.trackingNumber ?? "");
   const [notes, setNotes] = useState(initialOrder?.note === "No internal notes yet." ? "" : initialOrder?.note ?? "");
@@ -1008,6 +1084,7 @@ function OrderComposer({
   );
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [templateName, setTemplateName] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1061,6 +1138,26 @@ function OrderComposer({
     updateLine(index, { productId, unitPrice: product?.unit_price ?? "0.00" });
   };
 
+  const applyTemplate = (name: string) => {
+    const template = options?.templates.find((item) => item.name === name);
+    if (!template) return;
+    setLines(template.items.map((item) => ({ productId: item.product_id, quantity: item.quantity, unitPrice: item.unit_price })));
+    setNotes(template.notes);
+    setDepositRequired(template.deposit_required);
+    setTemplateName(template.name);
+  };
+
+  const saveTemplate = async () => {
+    if (!templateName.trim() || lines.some((line) => !line.productId)) { setFormError("Enter a template name and choose every product first."); return; }
+    try {
+      const response = await fetch(`${bridgeUrl}/api/order-templates`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: templateName, items: lines.map((line) => ({ product_id: line.productId, quantity: line.quantity, unit_price: line.unitPrice })), notes, deposit_required: depositRequired }) });
+      const payload = await response.json() as { ok: boolean; data?: OrderOptions["templates"]; error?: { message: string } };
+      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message || "Template could not be saved.");
+      setOptions((current) => current ? { ...current, templates: payload.data ?? current.templates } : current);
+      setFormError("");
+    } catch (error) { setFormError(error instanceof Error ? error.message : "Template could not be saved."); }
+  };
+
   const saveOrder = async () => {
     setFormError("");
     if (!customerName.trim() || !address.trim()) {
@@ -1087,6 +1184,10 @@ function OrderComposer({
             target_completion_date: targetDate || null,
             status,
             payment_status: paymentStatus,
+            record_type: recordType,
+            amount_paid: paymentStatus === "paid" ? total.toFixed(2) : amountPaid,
+            deposit_required: depositRequired,
+            quote_expires: recordType === "quote" ? quoteExpires || null : null,
             carrier,
             tracking_number: trackingNumber,
             notes,
@@ -1146,6 +1247,7 @@ function OrderComposer({
             {step === 2 ? (
               <div className="form-section">
                 <div className="form-heading"><div><span>02</span><div><h3>What are they ordering?</h3><p>Choose live products and confirm quantities and pricing.</p></div></div></div>
+                <div className="order-template-tools"><label><span>Start from template</span><select value={options?.templates.some((item) => item.name === templateName) ? templateName : ""} onChange={(event) => applyTemplate(event.target.value)}><option value="">Choose a saved template</option>{options?.templates.map((template) => <option value={template.name} key={template.name}>{template.name}</option>)}</select></label><label><span>Template name</span><input value={templateName} maxLength={80} placeholder="Wholesale hats" onChange={(event) => setTemplateName(event.target.value)} /></label><button type="button" className="secondary-button" onClick={() => void saveTemplate()}><BookmarkPlus size={15} /> Save current items</button></div>
                 {lines.map((line, index) => {
                   const product = products.find((item) => item.id === line.productId);
                   return (
@@ -1173,9 +1275,13 @@ function OrderComposer({
               <div className="form-section">
                 <div className="form-heading"><div><span>03</span><div><h3>Payment and totals</h3><p>Confirm pricing and how payment will be collected.</p></div></div></div>
                 <div className="form-grid">
+                  <label className="field"><span>Document type</span><select value={recordType} onChange={(event) => { const next = event.target.value as "order" | "quote"; setRecordType(next); if (next === "quote") setStatus("Quote"); else if (status === "Quote") setStatus("Received"); }}><option value="order">Sales order</option><option value="quote">Customer quote</option></select></label>
                   <label className="field"><span>Order date</span><input type="date" value={orderDate} onChange={(event) => setOrderDate(event.target.value)} /></label>
-                  <label className="field"><span>Workflow status</span><select value={status} onChange={(event) => setStatus(event.target.value as OrderStatus)}>{(options?.statuses ?? stages).map((item) => <option key={item}>{item}</option>)}</select></label>
+                  <label className="field"><span>Workflow status</span><select value={status} onChange={(event) => setStatus(event.target.value as OrderStatus)} disabled={recordType === "quote"}>{(options?.statuses ?? stages).map((item) => <option key={item}>{item}</option>)}</select></label>
                   <label className="field"><span>Payment status</span><select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}><option value="unpaid">Awaiting payment</option><option value="paid">Paid in full</option></select></label>
+                  <label className="field"><span>Amount paid</span><input type="number" min="0" max={total} step="0.01" value={amountPaid} disabled={paymentStatus === "paid" || recordType === "quote"} onChange={(event) => setAmountPaid(event.target.value)} /></label>
+                  <label className="field"><span>Required deposit</span><input type="number" min="0" max={total} step="0.01" value={depositRequired} onChange={(event) => setDepositRequired(event.target.value)} /></label>
+                  {recordType === "quote" ? <label className="field"><span>Quote expires</span><input type="date" min={orderDate} value={quoteExpires} onChange={(event) => setQuoteExpires(event.target.value)} /></label> : null}
                   <label className="field"><span>Sales tax</span><input readOnly value={`${options?.tax_rate_percent ?? "0.00"}% · ${currency(tax)}`} /></label>
                 </div>
               </div>
@@ -1195,13 +1301,14 @@ function OrderComposer({
           </div>
 
           <aside className="composer-summary">
-            <span>Order preview</span>
+            <span>{recordType === "quote" ? "Quote preview" : "Order preview"}</span>
             <h3>{initialOrder?.number ?? options?.next_order_number ?? "Next order"}</h3>
             <div className="summary-customer"><div className="avatar avatar-6">{initials(customerName || "New customer")}</div><div><strong>{customerName || "Choose a customer"}</strong><span>{address || "Shipping address needed"}</span></div></div>
             <div className="summary-line"><span>{itemCount} items</span><strong>{currency(subtotal)}</strong></div>
             <div className="summary-line"><span>Carrier</span><strong>{carrier || "Choose later"}</strong></div>
             <div className="summary-line"><span>Tax</span><strong>{currency(tax)}</strong></div>
             <div className="summary-total"><span>Total</span><strong>{currency(total)}</strong></div>
+            <div className="summary-line"><span>Paid / balance</span><strong>{currency(paymentStatus === "paid" ? total : Number(amountPaid) || 0)} / {currency(Math.max(0, total - (paymentStatus === "paid" ? total : Number(amountPaid) || 0)))}</strong></div>
             <div className="margin-callout"><BadgeDollarSign size={18} /><div><span>Estimated profit</span><strong>{currency(subtotal - estimatedCost)} · {subtotal > 0 ? `${(((subtotal - estimatedCost) / subtotal) * 100).toFixed(1)}% margin` : "Add products"}</strong></div></div>
           </aside>
         </div>
@@ -1213,7 +1320,7 @@ function OrderComposer({
             {step < 4 ? (
               <button className="primary-button" onClick={() => setStep((value) => value + 1)}>Continue <ChevronRight size={17} /></button>
             ) : (
-              <button className="primary-button" disabled={saving || !products.length} onClick={saveOrder}>{saving ? "Saving…" : initialOrder ? "Save changes" : "Create order"} <ChevronRight size={17} /></button>
+              <button className="primary-button" disabled={saving || !products.length} onClick={saveOrder}>{saving ? "Saving…" : initialOrder ? "Save changes" : recordType === "quote" ? "Create quote" : "Create order"} <ChevronRight size={17} /></button>
             )}
           </div>
         </footer>

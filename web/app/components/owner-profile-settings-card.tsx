@@ -51,7 +51,7 @@ export function OwnerProfileSettingsCard({ settings, onUpdated }: Props) {
     finally { setWorking(""); if (input.current) input.current.value = ""; }
   };
 
-  return <article className="settings-card owner-profile-card">
+  return <article className="settings-card owner-profile-card" id="settings-owner-profile">
     <div className="settings-card-heading"><span className="setting-icon"><UserRound size={19} /></span><div><h2>Owner profile</h2><p>The identity shown in the navigation footer</p></div><button className="secondary-button setting-save" onClick={() => void save()} disabled={Boolean(working)}><Save size={14} />{working === "save" ? "Saving…" : "Save"}</button></div>
     {message ? <div className={`settings-feedback ${message.tone}`} role="status"><Check size={15} />{message.text}</div> : null}
     <div className="owner-profile-layout">

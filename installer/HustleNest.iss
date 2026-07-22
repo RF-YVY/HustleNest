@@ -1,6 +1,6 @@
 ; Inno Setup script to package HustleNest into a Windows installer
 #define AppName "HustleNest"
-#define AppVersion "4.1"
+#define AppVersion "4.2"
 #define AppPublisher "HustleNest"
 #define AppURL "https://github.com/RF-YVY/HustleNest"
 #define OutputBase "HustleNestSetup"

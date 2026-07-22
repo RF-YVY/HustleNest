@@ -164,7 +164,8 @@ test("includes connected business, home, and reporting workspace modules", async
   assert.match(imports, /api\/imports\/preview/);
   assert.match(imports, /api\/imports\/execute/);
   assert.match(appearance, /Appearance & dashboard/);
-  assert.match(appearance, /Desktop fallback dashboard sections/);
+  assert.match(appearance, /Dashboard layout/);
+  assert.match(appearance, /Move \$\{section\.label\} up/);
   assert.match(appearance, /api\/settings\/logo/);
   assert.match(cloudSync, /Saved values never return to the browser/);
   assert.match(cloudSync, /PULL CLOUD DATA/);
@@ -181,7 +182,8 @@ test("includes connected business, home, and reporting workspace modules", async
   assert.match(quickAdd, /Extra unit costs/);
   assert.match(quickAdd, /Product status/);
   assert.match(quickAdd, /Automatically record when due/);
-  assert.match(globalSearch, /Find anything in HustleNest/);
+  assert.match(globalSearch, /Find or do anything/);
+  assert.match(globalSearch, /Command/);
   assert.match(globalSearch, /ArrowDown/);
   assert.match(globalSearch, /Ctrl K/);
   assert.match(globalSearch, /Recurring/);

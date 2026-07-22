@@ -38,18 +38,25 @@ from .data import (
 from .data.database import close_database_for_replacement, create_connection, get_database_path, get_storage_root, initialize
 from .models.order_models import BusinessGoal, CostComponent, CRMContact, CRMInteraction, DocumentRecord, Expense, GoalCheckpoint, LossRecord, Material, Order, OrderItem, PaymentOption, Product, RecurringExpense, Vendor
 from .browser_launcher import available_browsers, launch_configured_browser
-from .versioning import APP_VERSION, RELEASES_URL, REPOSITORY_URL
+from .versioning import APP_VERSION, RELEASES_URL, REPOSITORY_URL, check_for_updates
 from .services import cloud_sync_service, crm_service, finance_service, goal_service, import_service, order_service, report_service, soft_delete_service
 
 
 LOGGER = logging.getLogger("hustlenest.web_bridge")
-ORDER_STATUSES = ("Received", "Paid", "Processing", "Ready to Ship", "Shipped")
+ORDER_STATUSES = ("Quote", "Draft", "Awaiting Payment", "Received", "Paid", "Processing", "Ready to Ship", "Shipped")
+CLOSED_ORDER_STATUSES = frozenset({"Shipped", "Cancelled"})
 RECURRING_FREQUENCIES = {"daily", "weekly", "biweekly", "monthly", "quarterly", "yearly"}
 GOAL_METRICS = {"revenue", "sales", "profit", "orders", "expenses", "losses", "crm-followups"}
 US_STATE_NAMES = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia",
 }
 DASHBOARD_SECTIONS = {
+    "summary_metrics": "Summary metrics",
+    "priorities": "Needs your attention",
+    "shortcuts": "Quick actions",
+    "sales_trend": "Sales trend",
+    "goals": "Business goals",
+    "recent_orders": "Recent orders",
     "product_sales": "Product sales breakdown",
     "top_customers": "Top customers",
     "notifications": "Notifications",
@@ -58,6 +65,10 @@ DASHBOARD_SECTIONS = {
 }
 APPEARANCE_THEMES = {"light", "dark", "minty", "solar", "mission-control", "glass"}
 APPEARANCE_TEXT_SCALES = {1.0, 1.1, 1.25, 1.4}
+APPEARANCE_GLASS_INTENSITIES = {"subtle", "balanced", "vivid"}
+APPEARANCE_BACKGROUND_SOURCES = {"none", "preset", "custom"}
+APPEARANCE_BACKGROUND_PRESETS = {"aurora", "nebula", "prism", "sunset"}
+APPEARANCE_BACKGROUND_FITS = {"cover", "contain"}
 CLOUD_SYNC_PROVIDERS = {
     "local-folder": {"label": "Local folder (sync client)", "fields": (("directory", "Directory", True, False, ""), ("file_name", "Remote file name", False, False, "hustlenest.db"))},
     "google-drive": {"label": "Personal Google Drive", "fields": (("token_path", "Token JSON path", True, True, ""), ("client_secrets_path", "Client secrets path", False, True, ""), ("folder_id", "Folder ID", False, False, "root"), ("file_name", "Remote file name", False, False, "hustlenest.db"))},
@@ -72,6 +83,7 @@ MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_PRODUCT_PHOTO_BYTES = 8 * 1024 * 1024
 MAX_BRAND_LOGO_BYTES = 8 * 1024 * 1024
 MAX_PROFILE_AVATAR_BYTES = 5 * 1024 * 1024
+MAX_BACKGROUND_IMAGE_BYTES = 15 * 1024 * 1024
 MAX_IMPORT_BYTES = 12 * 1024 * 1024
 MAX_JSON_BODY_BYTES = 30 * 1024 * 1024
 
@@ -932,7 +944,7 @@ def about_workspace() -> dict[str, str]:
     return {
         "app_name": "HustleNest",
         "app_version": APP_VERSION,
-        "browser_version": "4.1.0",
+        "browser_version": "4.2.0",
         "repository_url": REPOSITORY_URL,
         "releases_url": RELEASES_URL,
         "runtime": "Local Python backend + browser UI",
@@ -1070,6 +1082,22 @@ def home_workspace() -> dict[str, Any]:
                 "target_id": contact.id,
             }
         )
+    followup_names = {contact.customer_name.strip().casefold() for contact in followups}
+    customer_orders: dict[str, list[dict[str, Any]]] = {}
+    for order in orders:
+        customer_orders.setdefault(order["customer_name"].strip().casefold(), []).append(order)
+    contact_lookup = {contact.customer_name.strip().casefold(): contact for contact in crm_repository.list_contacts()}
+    repeat_candidates: list[tuple[int, str, CRMContact]] = []
+    for customer_key, customer_history in customer_orders.items():
+        contact = contact_lookup.get(customer_key)
+        if not contact or customer_key in followup_names or len(customer_history) < 2:
+            continue
+        latest = max(datetime.strptime(item["order_date"], "%Y-%m-%d").date() for item in customer_history)
+        days_since = (today - latest).days
+        if 60 <= days_since <= 365:
+            repeat_candidates.append((days_since, customer_history[0]["customer_name"], contact))
+    for days_since, customer_name, contact in sorted(repeat_candidates, reverse=True)[:3]:
+        priorities.append({"key": f"repeat:{contact.id}", "kind": "customer", "severity": "info", "title": customer_name, "detail": f"Repeat-order opportunity · last order {days_since} days ago.", "value": None, "target_view": "customers", "target_id": contact.id})
     for recurring in finance["recurring"]:
         occurrence = recurring["next_occurrence"]
         if not occurrence or occurrence > (today + timedelta(days=30)).isoformat():
@@ -1091,7 +1119,7 @@ def home_workspace() -> dict[str, Any]:
 
     return {
         "metrics": {
-            "open_orders": sum(order["status"] != "Shipped" for order in orders),
+            "open_orders": order_metrics()["open_orders"],
             "revenue_ytd": report["metrics"]["revenue"],
             "net_ytd": report["metrics"]["net_after_overhead"],
             "cash_projection_30": _money(cash_flow.net_projection),
@@ -1662,15 +1690,17 @@ def _dashboard_section_settings() -> list[dict[str, Any]]:
         raw = {}
     if not isinstance(raw, dict):
         raw = {}
-    return [
+    sections = [
         {
             "key": key,
             "label": label,
             "visible": bool(raw.get(key, {}).get("visible", True)) if isinstance(raw.get(key, {}), dict) else True,
             "collapsed": bool(raw.get(key, {}).get("collapsed", False)) if isinstance(raw.get(key, {}), dict) else False,
+            "order": int(raw.get(key, {}).get("order", index)) if isinstance(raw.get(key, {}), dict) and str(raw.get(key, {}).get("order", index)).lstrip("-").isdigit() else index,
         }
-        for key, label in DASHBOARD_SECTIONS.items()
+        for index, (key, label) in enumerate(DASHBOARD_SECTIONS.items())
     ]
+    return sorted(sections, key=lambda item: (item["order"], list(DASHBOARD_SECTIONS).index(item["key"])))
 
 
 def _resolve_dashboard_logo(path_value: str) -> Optional[Path]:
@@ -1685,6 +1715,156 @@ def _resolve_dashboard_logo(path_value: str) -> Optional[Path]:
     except OSError:
         return None
     return resolved if resolved.is_file() else None
+
+
+def _default_background() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "source": "none",
+        "preset": "aurora",
+        "custom_path": "",
+        "fit": "cover",
+        "position_x": 50,
+        "position_y": 50,
+        "dim": 38,
+        "tone": "dark",
+    }
+
+
+def update_workspace() -> dict[str, Any]:
+    result = check_for_updates(timeout=5.0)
+    return {"current_version": APP_VERSION, "is_newer": result.is_newer, "latest_version": result.latest_version, "download_url": result.download_url or RELEASES_URL, "error": result.error}
+
+
+def health_center_workspace() -> dict[str, Any]:
+    """Return privacy-safe operational checks for the local workspace."""
+    today = date.today()
+    settings = settings_repository.get_app_settings()
+    orders = order_repository.fetch_orders(2000)
+    products = product_repository.list_products()
+    materials = material_repository.list_materials()
+    document_payload = documents_workspace()
+    backups = backup_workspace()
+    issues: list[dict[str, Any]] = []
+
+    def add(key: str, severity: str, title: str, detail: str, target_view: str, target_id: Optional[int] = None, setting_id: str = "") -> None:
+        issues.append({"key": key, "severity": severity, "title": title, "detail": detail, "target_view": target_view, "target_id": target_id, "setting_id": setting_id})
+
+    with create_connection() as connection:
+        integrity = str(connection.execute("PRAGMA quick_check").fetchone()[0])
+    if integrity.casefold() != "ok":
+        add("database-integrity", "critical", "Database needs attention", "SQLite integrity verification did not return OK. Create a backup and review diagnostics.", "settings", setting_id="settings-backups")
+
+    open_orders = [order for order in orders if order.status not in CLOSED_ORDER_STATUSES and _order_workflow(order.id)["record_type"] != "quote"]
+    quotes = [order for order in orders if _order_workflow(order.id)["record_type"] == "quote" and order.status != "Cancelled"]
+    overdue = [order for order in open_orders if order.target_completion_date and order.target_completion_date < today]
+    if overdue:
+        add("overdue-orders", "critical", f"{len(overdue)} overdue order{'s' if len(overdue) != 1 else ''}", "Target completion dates have passed.", "orders", overdue[0].id)
+    unpaid = [order for order in open_orders if not order.is_paid]
+    if unpaid:
+        add("unpaid-orders", "warning", f"{len(unpaid)} open order{'s' if len(unpaid) != 1 else ''} awaiting payment", f"Outstanding total: ${sum(order.display_total for order in unpaid):,.2f}.", "orders", unpaid[0].id)
+    expiring_quotes = [order for order in quotes if "quote_expired" in _attention_reasons(order)]
+    if expiring_quotes:
+        add("expired-quotes", "warning", f"{len(expiring_quotes)} expired quote{'s' if len(expiring_quotes) != 1 else ''}", "Follow up with the customer or close the quote.", "orders", expiring_quotes[0].id)
+
+    incomplete_products = [product for product in products if not product.is_complete]
+    if incomplete_products:
+        add("incomplete-products", "warning", f"{len(incomplete_products)} incomplete product record{'s' if len(incomplete_products) != 1 else ''}", "Complete pricing and product details for more accurate reporting.", "products", incomplete_products[0].id)
+    reorder_materials = [material for material in materials if material.quantity_on_hand <= material.reorder_point]
+    if reorder_materials:
+        add("materials-reorder", "warning", f"{len(reorder_materials)} material{'s' if len(reorder_materials) != 1 else ''} at reorder level", "Open inventory demand may require replenishment.", "materials", reorder_materials[0].id)
+
+    missing_documents = int(document_payload["metrics"]["missing"])
+    if missing_documents:
+        add("missing-documents", "warning", f"{missing_documents} document file{'s are' if missing_documents != 1 else ' is'} missing", "The database reference remains, but the linked file cannot be opened.", "documents")
+
+    if not settings.business_name.strip():
+        add("business-name", "warning", "Business identity is incomplete", "Add a business name for invoices and reports.", "settings", setting_id="settings-business")
+    if not settings.invoice_contact_email.strip():
+        add("invoice-contact", "info", "Invoice contact email is not configured", "Customers will not see a reply-to email on generated documents.", "settings", setting_id="settings-invoice")
+
+    backup_settings = backups["settings"]
+    last_backup = None
+    if backup_settings["last_backup"]:
+        try:
+            last_backup = datetime.fromisoformat(backup_settings["last_backup"])
+        except ValueError:
+            last_backup = None
+    backup_age_days = (datetime.now() - last_backup).days if last_backup else None
+    backup_healthy = bool(backup_settings["enabled"] and last_backup and backup_age_days is not None and backup_age_days <= (8 if backup_settings["frequency"] == "weekly" else 2))
+    if not backup_settings["enabled"]:
+        add("backups-disabled", "critical", "Automatic backups are disabled", "Enable scheduled backups to protect local business data.", "settings", setting_id="settings-backups")
+    elif last_backup is None:
+        add("backup-never", "warning", "No successful backup is recorded", "Run a backup now to verify the configured destination.", "settings", setting_id="settings-backups")
+    elif not backup_healthy:
+        add("backup-stale", "warning", f"Last backup was {backup_age_days} days ago", "Run a backup now and verify the configured schedule.", "settings", setting_id="settings-backups")
+
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    issues.sort(key=lambda item: (severity_rank[item["severity"]], item["title"].casefold()))
+    critical = sum(item["severity"] == "critical" for item in issues)
+    warnings = sum(item["severity"] == "warning" for item in issues)
+    return {
+        "score": max(0, 100 - critical * 25 - warnings * 8),
+        "status": "critical" if critical else ("attention" if warnings else "healthy"),
+        "checked_at": datetime.now().isoformat(),
+        "issues": issues,
+        "metrics": {"critical": critical, "warnings": warnings, "informational": sum(item["severity"] == "info" for item in issues), "open_orders": len(open_orders), "records_checked": len(orders) + len(products) + len(materials) + int(document_payload["metrics"]["total"])},
+        "backup": {"healthy": backup_healthy, "enabled": backup_settings["enabled"], "frequency": backup_settings["frequency"], "last_success": backup_settings["last_backup"], "age_days": backup_age_days, "available_count": backups["summary"]["count"]},
+        "database": {"integrity": integrity, "journal_mode": "WAL", "location": "Local application data"},
+    }
+
+
+def diagnostics_download() -> BinaryDownload:
+    """Export support diagnostics without customer records, paths, or credentials."""
+    health = health_center_workspace()
+    payload = {
+        "generated_at": datetime.now().isoformat(),
+        "application": about_workspace(),
+        "health": health,
+        "privacy": {"customer_records_included": False, "credentials_included": False, "filesystem_paths_included": False},
+    }
+    content = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+    return BinaryDownload(f"HustleNest_Diagnostics_{date.today().isoformat()}.json", "application/json; charset=utf-8", content)
+
+
+def _appearance_backgrounds(active_theme: str) -> dict[str, dict[str, Any]]:
+    try:
+        raw = json.loads(settings_repository.get_setting("appearance_backgrounds_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    backgrounds: dict[str, dict[str, Any]] = {}
+    for theme in APPEARANCE_THEMES:
+        incoming = raw.get(theme, {}) if isinstance(raw.get(theme, {}), dict) else {}
+        item = _default_background()
+        item.update({key: incoming[key] for key in item if key in incoming})
+        item["enabled"] = bool(item["enabled"])
+        item["source"] = item["source"] if item["source"] in APPEARANCE_BACKGROUND_SOURCES else "none"
+        item["preset"] = item["preset"] if item["preset"] in APPEARANCE_BACKGROUND_PRESETS else "aurora"
+        item["fit"] = item["fit"] if item["fit"] in APPEARANCE_BACKGROUND_FITS else "cover"
+        item["tone"] = item["tone"] if item["tone"] in {"light", "dark"} else "dark"
+        for key, fallback in (("position_x", 50), ("position_y", 50), ("dim", 38)):
+            try:
+                item[key] = min(100, max(0, int(item[key])))
+            except (TypeError, ValueError):
+                item[key] = fallback
+        item["custom_path"] = str(item["custom_path"] or "")
+        item["custom_configured"] = bool(item["custom_path"])
+        item["custom_available"] = bool(_resolve_dashboard_logo(item["custom_path"]))
+        backgrounds[theme] = item
+    legacy_path = (settings_repository.get_setting("browser_background_path") or "").strip()
+    if legacy_path and not backgrounds[active_theme]["custom_path"]:
+        backgrounds[active_theme].update({"enabled": True, "source": "custom", "custom_path": legacy_path, "custom_configured": True, "custom_available": bool(_resolve_dashboard_logo(legacy_path))})
+    return backgrounds
+
+
+def _stored_backgrounds(backgrounds: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        theme: {key: item[key] for key in _default_background()}
+        for theme, item in backgrounds.items()
+        if theme in APPEARANCE_THEMES
+    }
 
 
 def _profile_initials(display_name: str) -> str:
@@ -1707,6 +1887,12 @@ def settings_workspace() -> dict[str, Any]:
         text_scale = 1.0
     if not isfinite(text_scale) or text_scale not in APPEARANCE_TEXT_SCALES:
         text_scale = 1.0
+    backgrounds = _appearance_backgrounds(theme)
+    glass_intensity = (settings_repository.get_setting("appearance_glass_intensity") or "balanced").strip().casefold()
+    if glass_intensity not in APPEARANCE_GLASS_INTENSITIES:
+        glass_intensity = "balanced"
+    reduce_transparency = (settings_repository.get_setting("appearance_reduce_transparency") or "0").strip().casefold() in {"1", "true", "yes", "on"}
+    reduce_motion = (settings_repository.get_setting("appearance_reduce_motion") or "0").strip().casefold() in {"1", "true", "yes", "on"}
     address = ", ".join(
         part
         for part in (
@@ -1755,6 +1941,11 @@ def settings_workspace() -> dict[str, Any]:
         "appearance": {
             "theme": theme,
             "text_scale": text_scale,
+            "glass_intensity": glass_intensity,
+            "reduce_transparency": reduce_transparency,
+            "reduce_motion": reduce_motion,
+            "backgrounds": backgrounds,
+            "active_background": backgrounds[theme],
             "logo_alignment": settings.dashboard_logo_alignment,
             "logo_size": settings.dashboard_logo_size,
             "dashboard_sections": _dashboard_section_settings(),
@@ -1835,6 +2026,46 @@ def _setting_int(value: Any, field: str, minimum: int, maximum: int) -> int:
     if parsed < minimum or parsed > maximum:
         raise BridgeError("validation_failed", "Some settings need attention.", HTTPStatus.BAD_REQUEST, {field: "out_of_range"})
     return parsed
+
+
+def _validated_backgrounds(raw: Any, current: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    if raw is None:
+        return current
+    if not isinstance(raw, dict):
+        raise BridgeError("validation_failed", "Background settings are invalid.", HTTPStatus.BAD_REQUEST, {"backgrounds": "invalid"})
+    validated: dict[str, dict[str, Any]] = {}
+    for theme in APPEARANCE_THEMES:
+        incoming = raw.get(theme, current[theme])
+        if not isinstance(incoming, dict):
+            raise BridgeError("validation_failed", "Background settings are invalid.", HTTPStatus.BAD_REQUEST, {f"backgrounds.{theme}": "invalid"})
+        source = str(incoming.get("source", current[theme]["source"])).strip().casefold()
+        preset = str(incoming.get("preset", current[theme]["preset"])).strip().casefold()
+        fit = str(incoming.get("fit", current[theme]["fit"])).strip().casefold()
+        tone = str(incoming.get("tone", current[theme]["tone"])).strip().casefold()
+        if source not in APPEARANCE_BACKGROUND_SOURCES:
+            raise BridgeError("validation_failed", "Choose a valid background source.", HTTPStatus.BAD_REQUEST, {f"backgrounds.{theme}.source": "invalid_choice"})
+        if preset not in APPEARANCE_BACKGROUND_PRESETS:
+            raise BridgeError("validation_failed", "Choose a valid background preset.", HTTPStatus.BAD_REQUEST, {f"backgrounds.{theme}.preset": "invalid_choice"})
+        if fit not in APPEARANCE_BACKGROUND_FITS:
+            raise BridgeError("validation_failed", "Choose a valid background fit.", HTTPStatus.BAD_REQUEST, {f"backgrounds.{theme}.fit": "invalid_choice"})
+        if tone not in {"light", "dark"}:
+            raise BridgeError("validation_failed", "Background tone is invalid.", HTTPStatus.BAD_REQUEST, {f"backgrounds.{theme}.tone": "invalid_choice"})
+        item = {
+            "enabled": _setting_bool(incoming.get("enabled", current[theme]["enabled"]), f"backgrounds.{theme}.enabled"),
+            "source": source,
+            "preset": preset,
+            "custom_path": current[theme]["custom_path"],
+            "fit": fit,
+            "position_x": _setting_int(incoming.get("position_x", current[theme]["position_x"]), f"backgrounds.{theme}.position_x", 0, 100),
+            "position_y": _setting_int(incoming.get("position_y", current[theme]["position_y"]), f"backgrounds.{theme}.position_y", 0, 100),
+            "dim": _setting_int(incoming.get("dim", current[theme]["dim"]), f"backgrounds.{theme}.dim", 0, 100),
+            "tone": tone,
+        }
+        if item["source"] == "custom" and not item["custom_path"]:
+            item["source"] = "none"
+            item["enabled"] = False
+        validated[theme] = item
+    return validated
 
 
 def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1968,6 +2199,12 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
             text_scale = 0.0
         if not isfinite(text_scale) or text_scale not in APPEARANCE_TEXT_SCALES:
             raise BridgeError("validation_failed", "Choose an available text size.", HTTPStatus.BAD_REQUEST, {"text_scale": "invalid_choice"})
+        glass_intensity = str(values.get("glass_intensity", current_appearance["glass_intensity"])).strip().casefold()
+        if glass_intensity not in APPEARANCE_GLASS_INTENSITIES:
+            raise BridgeError("validation_failed", "Choose a valid glass intensity.", HTTPStatus.BAD_REQUEST, {"glass_intensity": "invalid_choice"})
+        reduce_transparency = _setting_bool(values.get("reduce_transparency", current_appearance["reduce_transparency"]), "reduce_transparency")
+        reduce_motion = _setting_bool(values.get("reduce_motion", current_appearance["reduce_motion"]), "reduce_motion")
+        backgrounds = _validated_backgrounds(values.get("backgrounds"), current_appearance["backgrounds"])
         alignment = str(values.get("logo_alignment", current_appearance["logo_alignment"])).strip().casefold()
         if alignment not in {"top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"}:
             raise BridgeError("validation_failed", "Logo alignment is invalid.", HTTPStatus.BAD_REQUEST, {"logo_alignment": "invalid_choice"})
@@ -1980,12 +2217,18 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
             key: {
                 "visible": _setting_bool(incoming.get(key, {}).get("visible", True), f"dashboard_sections.{key}.visible"),
                 "collapsed": _setting_bool(incoming.get(key, {}).get("collapsed", False), f"dashboard_sections.{key}.collapsed"),
+                "order": _setting_int(incoming.get(key, {}).get("order", index), f"dashboard_sections.{key}.order", 0, len(DASHBOARD_SECTIONS) - 1),
             }
-            for key in DASHBOARD_SECTIONS
+            for index, key in enumerate(DASHBOARD_SECTIONS)
         }
         updates = {
             "app_theme": theme,
             "browser_text_scale": f"{text_scale:g}",
+            "appearance_glass_intensity": glass_intensity,
+            "appearance_reduce_transparency": "1" if reduce_transparency else "0",
+            "appearance_reduce_motion": "1" if reduce_motion else "0",
+            "appearance_backgrounds_json": json.dumps(_stored_backgrounds(backgrounds), separators=(",", ":")),
+            "browser_background_path": "",
             "dashboard_logo_alignment": alignment,
             "dashboard_logo_size": str(logo_size),
             "dashboard_sections_json": json.dumps(sections, separators=(",", ":")),
@@ -2002,6 +2245,8 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         raise BridgeError("invalid_section", "That settings section is not editable here.", HTTPStatus.BAD_REQUEST)
     settings_repository.set_settings(updates)
+    safe_fields = sorted(key for key in values if key not in {"methods", "other_replacement", "backgrounds"})
+    _log_system_event("Settings changed", f"{section.title()} settings updated" + (f": {', '.join(safe_fields)}." if safe_fields else "."))
     return settings_workspace()
 
 
@@ -2074,6 +2319,101 @@ def download_dashboard_logo() -> BinaryDownload:
     path = _resolve_dashboard_logo(settings_repository.get_app_settings().dashboard_logo_path)
     if path is None:
         raise BridgeError("file_missing", "The business logo could not be found.", HTTPStatus.NOT_FOUND)
+    return BinaryDownload(path.name, mimetypes.guess_type(path.name)[0] or "application/octet-stream", path.read_bytes())
+
+
+def _decode_background_image(payload: dict[str, Any]) -> tuple[bytes, str, str]:
+    upload = payload.get("file")
+    if not isinstance(upload, dict):
+        raise BridgeError("validation_failed", "Choose a background image.", HTTPStatus.BAD_REQUEST, {"file": "required"})
+    try:
+        content = base64.b64decode(str(upload.get("content_base64", "")), validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise BridgeError("validation_failed", "The background image could not be read.", HTTPStatus.BAD_REQUEST, {"file": "invalid_content"}) from exc
+    if not content:
+        raise BridgeError("validation_failed", "The background image is empty.", HTTPStatus.BAD_REQUEST, {"file": "empty"})
+    if len(content) > MAX_BACKGROUND_IMAGE_BYTES:
+        raise BridgeError("validation_failed", "Background images must be 15 MB or smaller.", HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"file": "too_large"})
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return content, ".png", "image/png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return content, ".jpg", "image/jpeg"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return content, ".webp", "image/webp"
+    raise BridgeError("validation_failed", "Use a PNG, JPEG, or WebP background image.", HTTPStatus.BAD_REQUEST, {"file": "unsupported_type"})
+
+
+def _delete_managed_background(path_value: str) -> None:
+    path = _resolve_dashboard_logo(path_value)
+    if path is None:
+        return
+    managed_root = (get_storage_root() / "media" / "backgrounds").resolve()
+    try:
+        path.relative_to(managed_root)
+    except ValueError:
+        return
+    path.unlink(missing_ok=True)
+
+
+def _background_theme(value: Any) -> str:
+    theme = str(value or "").strip().casefold()
+    if theme not in APPEARANCE_THEMES:
+        raise BridgeError("validation_failed", "Choose a valid theme background.", HTTPStatus.BAD_REQUEST, {"theme": "invalid_choice"})
+    return theme
+
+
+def save_background_image(payload: dict[str, Any]) -> dict[str, Any]:
+    current = settings_workspace()
+    expected_revision = str(payload.get("expected_revision", "")).strip()
+    if expected_revision and expected_revision != current["summary"]["revision"]:
+        raise BridgeError("settings_conflict", "Settings changed in another window. Refresh and try again.", HTTPStatus.CONFLICT)
+    theme = _background_theme(payload.get("theme", current["appearance"]["theme"]))
+    tone = str(payload.get("tone", "dark")).strip().casefold()
+    if tone not in {"light", "dark"}:
+        tone = "dark"
+    content, suffix, _ = _decode_background_image(payload)
+    with MUTATION_LOCK:
+        backgrounds = current["appearance"]["backgrounds"]
+        previous = backgrounds[theme]["custom_path"]
+        folder = get_storage_root() / "media" / "backgrounds"
+        folder.mkdir(parents=True, exist_ok=True)
+        destination = folder / f"workspace_{theme}_{hashlib.sha256(content).hexdigest()[:16]}{suffix}"
+        destination.write_bytes(content)
+        relative = str(destination.relative_to(get_storage_root()))
+        backgrounds[theme].update({"enabled": True, "source": "custom", "custom_path": relative, "tone": tone, "dim": max(int(backgrounds[theme]["dim"]), 52) if tone == "light" else int(backgrounds[theme]["dim"])})
+        settings_repository.set_settings({
+            "appearance_backgrounds_json": json.dumps(_stored_backgrounds(backgrounds), separators=(",", ":")),
+            "browser_background_path": "",
+        })
+        if previous != relative:
+            _delete_managed_background(previous)
+    return settings_workspace()
+
+
+def delete_background_image(payload: dict[str, Any]) -> dict[str, Any]:
+    current = settings_workspace()
+    expected_revision = str(payload.get("expected_revision", "")).strip()
+    if expected_revision and expected_revision != current["summary"]["revision"]:
+        raise BridgeError("settings_conflict", "Settings changed in another window. Refresh and try again.", HTTPStatus.CONFLICT)
+    theme = _background_theme(payload.get("theme", current["appearance"]["theme"]))
+    with MUTATION_LOCK:
+        backgrounds = current["appearance"]["backgrounds"]
+        previous = backgrounds[theme]["custom_path"]
+        backgrounds[theme].update({"enabled": False, "source": "none", "custom_path": ""})
+        settings_repository.set_settings({
+            "appearance_backgrounds_json": json.dumps(_stored_backgrounds(backgrounds), separators=(",", ":")),
+            "browser_background_path": "",
+        })
+        _delete_managed_background(previous)
+    return settings_workspace()
+
+
+def download_background_image(theme: str) -> BinaryDownload:
+    current = settings_workspace()
+    selected_theme = _background_theme(theme or current["appearance"]["theme"])
+    path = _resolve_dashboard_logo(current["appearance"]["backgrounds"][selected_theme]["custom_path"])
+    if path is None:
+        raise BridgeError("file_missing", "The background image could not be found.", HTTPStatus.NOT_FOUND)
     return BinaryDownload(path.name, mimetypes.guess_type(path.name)[0] or "application/octet-stream", path.read_bytes())
 
 
@@ -2378,7 +2718,10 @@ def execute_browser_import(payload: dict[str, Any]) -> dict[str, Any]:
             "customers": import_service.import_customers,
         }[import_type]
         with MUTATION_LOCK:
+            safety_workspace = create_browser_backup(guard_revision=False)
+            safety_backup = safety_workspace["backups"][0]["filename"] if safety_workspace["backups"] else ""
             result = importer(str(path), mappings, bool(payload.get("skip_duplicates", True)))
+            _log_system_event("Data imported", f"{import_type.title()} import completed: {result.imported_count} imported, {result.skipped_count} skipped, {result.error_count} errors.")
     return {
         "success": result.success,
         "imported_count": result.imported_count,
@@ -2387,6 +2730,7 @@ def execute_browser_import(payload: dict[str, Any]) -> dict[str, Any]:
         "errors": result.errors[:100],
         "warnings": result.warnings[:100],
         "messages_truncated": len(result.errors) > 100 or len(result.warnings) > 100,
+        "safety_backup": safety_backup,
     }
 
 
@@ -2404,8 +2748,10 @@ def _backup_rows() -> list[dict[str, Any]]:
                 stat = path.stat()
             except OSError:
                 continue
+            media_folder = path.with_suffix(".media")
+            media_size = sum(item.stat().st_size for item in media_folder.rglob("*") if item.is_file()) if media_folder.is_dir() else 0
             identity = _record_revision({"name": path.name, "size": stat.st_size, "modified": stat.st_mtime_ns})
-            rows.append({"id": identity, "filename": path.name, "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(), "size_bytes": stat.st_size})
+            rows.append({"id": identity, "filename": path.name, "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(), "size_bytes": stat.st_size + media_size, "includes_media": media_size > 0})
     return sorted(rows, key=lambda item: item["created_at"], reverse=True)
 
 
@@ -2451,6 +2797,7 @@ def update_backup_settings(payload: dict[str, Any]) -> dict[str, Any]:
         except OSError as exc:
             raise BridgeError("folder_unavailable", "The backup folder could not be created.", HTTPStatus.BAD_REQUEST, {"folder": "unavailable"}) from exc
     settings_repository.set_settings({"backup_enabled": "1" if enabled else "0", "backup_folder": folder_text, "backup_frequency": frequency, "backup_max_count": str(max_backups)})
+    _log_system_event("Settings changed", "Backup settings updated.")
     return backup_workspace()
 
 
@@ -2480,12 +2827,17 @@ def create_browser_backup(payload: Optional[dict[str, Any]] = None, *, guard_rev
             source.close()
             source = None
             temporary.replace(destination)
+            background_source = get_storage_root() / "media" / "backgrounds"
+            media_destination = destination.with_suffix(".media") / "backgrounds"
+            if background_source.is_dir():
+                shutil.copytree(background_source, media_destination, dirs_exist_ok=True)
         except (OSError, sqlite3.Error) as exc:
             if target is not None:
                 target.close()
             if source is not None:
                 source.close()
             temporary.unlink(missing_ok=True)
+            shutil.rmtree(destination.with_suffix(".media"), ignore_errors=True)
             raise BridgeError("backup_failed", "The database backup could not be created.", HTTPStatus.INTERNAL_SERVER_ERROR) from exc
         settings_repository.set_setting("backup_last_timestamp", datetime.now().isoformat())
         rows = _backup_rows()
@@ -2494,6 +2846,8 @@ def create_browser_backup(payload: Optional[dict[str, Any]] = None, *, guard_rev
             match = next((path for path in folder.glob("hustlenest_backup_*.db") if path.name == stale["filename"]), None)
             if match:
                 match.unlink(missing_ok=True)
+                shutil.rmtree(match.with_suffix(".media"), ignore_errors=True)
+    _log_system_event("Backup created", f"Protected local backup created: {destination.name}.")
     return backup_workspace()
 
 
@@ -2544,7 +2898,11 @@ def restore_browser_backup(backup_id: str, payload: dict[str, Any]) -> dict[str,
             if release_error:
                 raise OSError(release_error)
             shutil.copy2(path, database)
+            background_backup = path.with_suffix(".media") / "backgrounds"
+            if background_backup.is_dir():
+                shutil.copytree(background_backup, get_storage_root() / "media" / "backgrounds", dirs_exist_ok=True)
             initialize()
+            _log_system_event("Backup restored", f"Database restored from verified backup {row['filename']}.")
         except Exception as exc:
             if target is not None:
                 target.close()
@@ -3086,6 +3444,10 @@ def _order_event_dto(event: Any, available_order_ids: Optional[set[int]] = None)
     }
 
 
+def _log_system_event(event_type: str, description: str) -> None:
+    order_repository.log_order_event(None, "SYSTEM", event_type[:120], description[:1000], 0)
+
+
 def history_workspace(order_query: str = "", start_date: Optional[date] = None, end_date: Optional[date] = None, limit: int = 200) -> dict[str, Any]:
     events = order_service.list_order_history(order_number=order_query or None, start_date=start_date, end_date=end_date, limit=min(max(limit, 1), 500))
     event_order_ids = {event.order_id for event in events if event.order_id is not None}
@@ -3111,8 +3473,50 @@ def history_workspace(order_query: str = "", start_date: Optional[date] = None, 
     }
 
 
+def _order_workflow(order_id: Optional[int]) -> dict[str, Any]:
+    if not order_id:
+        return {"record_type": "order", "amount_paid": 0.0, "deposit_required": 0.0, "quote_expires": None, "template_name": ""}
+    with create_connection() as connection:
+        row = connection.execute("SELECT record_type, amount_paid, deposit_required, quote_expires, template_name FROM order_workflow WHERE order_id = ?", (int(order_id),)).fetchone()
+    if row is None:
+        return {"record_type": "order", "amount_paid": 0.0, "deposit_required": 0.0, "quote_expires": None, "template_name": ""}
+    return {"record_type": row["record_type"] or "order", "amount_paid": float(row["amount_paid"] or 0), "deposit_required": float(row["deposit_required"] or 0), "quote_expires": row["quote_expires"] or None, "template_name": row["template_name"] or ""}
+
+
+def _save_order_workflow(order_id: int, draft: dict[str, Any], total: float, *, existing: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    current = existing or _order_workflow(order_id)
+    record_type = str(draft.get("record_type", current["record_type"])).strip().casefold()
+    if record_type not in {"order", "quote"}:
+        raise BridgeError("validation_failed", "Choose order or quote.", HTTPStatus.BAD_REQUEST, {"record_type": "invalid_choice"})
+    amount_paid = _nonnegative_number(draft, "amount_paid", "Amount paid") if "amount_paid" in draft else (total if str(draft.get("payment_status", "")).strip().casefold() == "paid" else (0.0 if str(draft.get("payment_status", "")).strip().casefold() == "unpaid" else float(current["amount_paid"])))
+    deposit_required = _nonnegative_number(draft, "deposit_required", "Required deposit") if "deposit_required" in draft else float(current["deposit_required"])
+    if amount_paid > total + 0.005:
+        raise BridgeError("validation_failed", "Amount paid cannot exceed the order total.", HTTPStatus.BAD_REQUEST, {"amount_paid": "exceeds_total"})
+    if deposit_required > total + 0.005:
+        raise BridgeError("validation_failed", "Required deposit cannot exceed the order total.", HTTPStatus.BAD_REQUEST, {"deposit_required": "exceeds_total"})
+    quote_expires = _date_field({"quote_expires": draft.get("quote_expires", current["quote_expires"] or "")}, "quote_expires", "Quote expiration", required=False)
+    template_name = str(draft.get("template_name", current["template_name"])).strip()[:120]
+    with create_connection() as connection:
+        connection.execute(
+            """INSERT INTO order_workflow (order_id, record_type, amount_paid, deposit_required, quote_expires, template_name, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(order_id) DO UPDATE SET record_type=excluded.record_type, amount_paid=excluded.amount_paid, deposit_required=excluded.deposit_required, quote_expires=excluded.quote_expires, template_name=excluded.template_name, updated_at=CURRENT_TIMESTAMP""",
+            (int(order_id), record_type, amount_paid, deposit_required, quote_expires.isoformat() if quote_expires else None, template_name),
+        )
+        connection.execute("UPDATE orders SET is_paid = ? WHERE id = ?", (int(total > 0 and amount_paid >= total - 0.005), int(order_id)))
+        connection.commit()
+    return _order_workflow(order_id)
+
+
 def _attention_reasons(order: Order) -> list[str]:
+    if order.status in CLOSED_ORDER_STATUSES:
+        return []
     reasons: list[str] = []
+    workflow = _order_workflow(order.id)
+    if workflow["record_type"] == "quote":
+        if workflow["quote_expires"] and workflow["quote_expires"] < date.today().isoformat():
+            reasons.append("quote_expired")
+        return reasons
     if not order.is_paid:
         reasons.append("payment_outstanding")
     if (
@@ -3130,6 +3534,8 @@ def order_dto(order: Order, contacts: Optional[dict[str, CRMContact]] = None) ->
     contact = (contacts or {}).get(order.customer_name.strip().casefold())
     subtotal = order.total_amount
     total = order.display_total
+    workflow = _order_workflow(order.id)
+    amount_paid = min(float(workflow["amount_paid"]), total)
     customer = {
         "id": contact.id if contact else None,
         "name": order.customer_name,
@@ -3149,11 +3555,20 @@ def order_dto(order: Order, contacts: Optional[dict[str, CRMContact]] = None) ->
         ),
         "ship_date": order.ship_date.isoformat() if order.ship_date else None,
         "status": order.status,
-        "payment_status": "paid" if order.is_paid else "unpaid",
+        "record_type": workflow["record_type"],
+        "payment_status": "paid" if order.is_paid else ("partial" if amount_paid > 0 else "unpaid"),
+        "amount_paid": _money(amount_paid),
+        "deposit_required": _money(workflow["deposit_required"]),
+        "balance_due": _money(max(0.0, total - amount_paid)),
+        "quote_expires": workflow["quote_expires"],
+        "template_name": workflow["template_name"],
         "subtotal": _money(subtotal),
         "tax_rate": _money(order.tax_rate),
         "tax_amount": _money(order.tax_amount),
         "total": _money(total),
+        "total_cost": _money(order.total_cost),
+        "profit": _money(order.total_profit),
+        "profit_margin": round(order.profit_margin * 100, 1),
         "item_count": sum(item.quantity for item in order.items),
         "attention_reasons": _attention_reasons(order),
         "items": [_line_dto(item) for item in order.items],
@@ -3186,16 +3601,18 @@ def get_order(order_id: int) -> dict[str, Any]:
 
 def order_metrics() -> dict[str, Any]:
     orders = order_repository.fetch_orders(2000)
-    open_orders = [order for order in orders if order.status not in {"Shipped", "Cancelled"}]
+    open_orders = [order for order in orders if order.status not in CLOSED_ORDER_STATUSES and _order_workflow(order.id)["record_type"] != "quote"]
+    quotes = [order for order in orders if _order_workflow(order.id)["record_type"] == "quote" and order.status != "Cancelled"]
     unpaid = [order for order in open_orders if not order.is_paid]
     ready = [order for order in open_orders if order.status == "Ready to Ship"]
     attention = [order for order in open_orders if _attention_reasons(order)]
     return {
         "open_orders": len(open_orders),
-        "awaiting_payment": _money(sum(order.display_total for order in unpaid)),
+        "awaiting_payment": _money(sum(max(0.0, order.display_total - float(_order_workflow(order.id)["amount_paid"])) for order in unpaid)),
         "awaiting_payment_count": len(unpaid),
         "ready_to_ship": len(ready),
         "needs_attention": len(attention),
+        "open_quotes": len(quotes),
     }
 
 
@@ -3221,7 +3638,40 @@ def order_options() -> dict[str, Any]:
         "tax_rate_percent": _money(settings.tax_rate_percent),
         "tax_add_to_total": settings.tax_add_to_total,
         "next_order_number": _order_number(),
+        "templates": order_templates(),
     }
+
+
+def order_templates() -> list[dict[str, Any]]:
+    try:
+        templates = json.loads(settings_repository.get_setting("order_templates_json") or "[]")
+    except (json.JSONDecodeError, TypeError):
+        templates = []
+    if not isinstance(templates, list):
+        return []
+    return [item for item in templates if isinstance(item, dict) and str(item.get("name", "")).strip()][:20]
+
+
+def save_order_template(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    name = _required_text(payload, "name", "Template name", 80)
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list) or not raw_items or len(raw_items) > 50:
+        raise BridgeError("validation_failed", "Add at least one product before saving a template.", HTTPStatus.BAD_REQUEST, {"items": "required"})
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            raise BridgeError("validation_failed", "A template line is invalid.", HTTPStatus.BAD_REQUEST, {f"items.{index}": "invalid"})
+        product_id = _optional_id(item, "product_id")
+        if not product_id or product_repository.get_product_by_id(product_id) is None:
+            raise BridgeError("validation_failed", "A template product no longer exists.", HTTPStatus.BAD_REQUEST, {f"items.{index}.product_id": "not_found"})
+        quantity = _setting_int(item.get("quantity", 1), f"items.{index}.quantity", 1, 100000)
+        unit_price = _nonnegative_number(item, "unit_price", "Template unit price")
+        items.append({"product_id": product_id, "quantity": quantity, "unit_price": _money(unit_price)})
+    template = {"name": name, "items": items, "notes": _optional_text(payload, "notes", 2000), "deposit_required": _money(_nonnegative_number(payload, "deposit_required", "Required deposit")), "created_at": datetime.now().isoformat()}
+    templates = [item for item in order_templates() if str(item.get("name", "")).strip().casefold() != name.casefold()]
+    templates.insert(0, template)
+    settings_repository.set_setting("order_templates_json", json.dumps(templates[:20], ensure_ascii=False, separators=(",", ":")))
+    return order_templates()
 
 
 def _parse_date(value: Any, field: str, fields: dict[str, str], *, required: bool) -> Optional[date]:
@@ -3407,6 +3857,10 @@ def _sync_customer(draft: dict[str, Any]) -> None:
 
 def create_order(draft: dict[str, Any]) -> dict[str, Any]:
     with MUTATION_LOCK:
+        draft = dict(draft)
+        record_type = str(draft.get("record_type", "order")).strip().casefold()
+        if record_type == "quote": draft["status"] = "Quote"
+        elif draft.get("status") == "Quote": draft["status"] = "Received"
         order = _build_order_from_draft(draft)
         try:
             order_id = order_repository.insert_order(order)
@@ -3417,8 +3871,10 @@ def create_order(draft: dict[str, Any]) -> dict[str, Any]:
                 "The next order number is already in use. Review numbering settings and try again.",
                 HTTPStatus.CONFLICT,
             ) from exc
-        for sku, quantity in _item_quantities(order).items():
-            product_repository.adjust_inventory(sku, -quantity)
+        _save_order_workflow(order_id, draft, order.display_total)
+        if record_type != "quote":
+            for sku, quantity in _item_quantities(order).items():
+                product_repository.adjust_inventory(sku, -quantity)
         order_repository.log_order_event(
             order_id,
             order.order_number,
@@ -3442,10 +3898,16 @@ def update_order_from_draft(order_id: int, draft: dict[str, Any]) -> dict[str, A
                 "The order changed in another window. Refresh and try again.",
                 HTTPStatus.CONFLICT,
             )
+        previous_workflow = _order_workflow(order_id)
+        draft = dict(draft)
+        record_type = str(draft.get("record_type", previous_workflow["record_type"])).strip().casefold()
+        if record_type == "quote": draft["status"] = "Quote"
+        elif draft.get("status") == "Quote": draft["status"] = "Received"
         updated = _build_order_from_draft(draft, existing)
-        old_quantities = _item_quantities(existing)
-        new_quantities = _item_quantities(updated)
+        old_quantities = _item_quantities(existing) if previous_workflow["record_type"] != "quote" else {}
+        new_quantities = _item_quantities(updated) if record_type != "quote" else {}
         order_repository.update_order(order_id, updated)
+        _save_order_workflow(order_id, draft, updated.display_total, existing=previous_workflow)
         for sku in sorted(set(old_quantities) | set(new_quantities)):
             difference = new_quantities.get(sku, 0) - old_quantities.get(sku, 0)
             if difference:
@@ -3465,12 +3927,20 @@ def advance_order(order_id: int, expected_status: str) -> dict[str, Any]:
     expected = expected_status.strip()
     if expected not in ORDER_STATUSES:
         raise BridgeError("invalid_status", "The current status is not recognized.", HTTPStatus.BAD_REQUEST)
-    current_index = ORDER_STATUSES.index(expected)
-    if current_index == len(ORDER_STATUSES) - 1:
+    transitions = {"Quote": "Received", "Draft": "Received", "Awaiting Payment": "Paid", "Received": "Paid", "Paid": "Processing", "Processing": "Ready to Ship", "Ready to Ship": "Shipped"}
+    if expected not in transitions:
         raise BridgeError("already_complete", "The order is already complete.", HTTPStatus.CONFLICT)
-
-    next_status = ORDER_STATUSES[current_index + 1]
+    next_status = transitions[expected]
     ship_date = date.today().isoformat() if next_status == "Shipped" else None
+    workflow = _order_workflow(order_id)
+    if workflow["record_type"] == "quote" and expected == "Quote":
+        quoted_order = order_repository.fetch_order(order_id)
+        if quoted_order:
+            for sku, quantity in _item_quantities(quoted_order).items():
+                product_repository.adjust_inventory(sku, -quantity)
+        with create_connection() as workflow_connection:
+            workflow_connection.execute("UPDATE order_workflow SET record_type = 'order', updated_at = CURRENT_TIMESTAMP WHERE order_id = ?", (int(order_id),))
+            workflow_connection.commit()
     with create_connection() as connection:
         cursor = connection.execute(
             """
@@ -3526,6 +3996,9 @@ def update_order_payment(order_id: int, payload: dict[str, Any]) -> dict[str, An
             raise BridgeError("payment_conflict", "The payment status changed in another window. Refresh and try again.", HTTPStatus.CONFLICT)
         if requested != actual:
             connection.execute("UPDATE orders SET is_paid = ? WHERE id = ?", (int(requested == "paid"), int(order_id)))
+            total_row = connection.execute("SELECT total_amount, tax_amount, tax_included_in_total FROM orders WHERE id = ?", (int(order_id),)).fetchone()
+            total = float(total_row["total_amount"] or 0) + (float(total_row["tax_amount"] or 0) if bool(total_row["tax_included_in_total"]) else 0)
+            connection.execute("INSERT INTO order_workflow (order_id, amount_paid) VALUES (?, ?) ON CONFLICT(order_id) DO UPDATE SET amount_paid=excluded.amount_paid, updated_at=CURRENT_TIMESTAMP", (int(order_id), total if requested == "paid" else 0.0))
             connection.execute(
                 "INSERT INTO order_history (order_id, order_number, event_type, description, amount_delta) VALUES (?, ?, 'Payment changed', ?, 0)",
                 (int(order_id), row["order_number"], f"Payment marked {requested} from browser workspace."),
@@ -3543,7 +4016,17 @@ def cancel_order_from_browser(order_id: int, expected_status: str) -> dict[str, 
             raise BridgeError("status_conflict", "The order changed in another window. Refresh and try again.", HTTPStatus.CONFLICT)
         if order.status == "Cancelled":
             raise BridgeError("already_cancelled", "The order is already cancelled.", HTTPStatus.CONFLICT)
-        order_service.cancel_order(order_id)
+        workflow = _order_workflow(order_id)
+        if workflow["record_type"] == "quote":
+            with create_connection() as connection:
+                connection.execute("UPDATE orders SET status = 'Cancelled' WHERE id = ?", (int(order_id),))
+                connection.execute(
+                    "INSERT INTO order_history (order_id, order_number, event_type, description, amount_delta) VALUES (?, ?, 'Status changed', ?, 0)",
+                    (int(order_id), order.order_number, "Quote cancelled. No inventory adjustment was required."),
+                )
+                connection.commit()
+        else:
+            order_service.cancel_order(order_id)
     return get_order(order_id)
 
 
@@ -3552,9 +4035,11 @@ def invoice_download(order_id: int) -> BinaryDownload:
     if order is None:
         raise BridgeError("not_found", "Order not found.", HTTPStatus.NOT_FOUND)
     safe_number = "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in order.order_number).strip("_") or f"order-{order_id}"
-    filename = f"{safe_number}_{'receipt' if order.is_paid else 'invoice'}.pdf"
+    workflow = _order_workflow(order_id)
+    document_kind = "quote" if workflow["record_type"] == "quote" else ("receipt" if order.is_paid else "invoice")
+    filename = f"{safe_number}_{document_kind}.pdf"
     with TemporaryDirectory(prefix="hustlenest-invoice-") as directory:
-        path = order_service.export_order_invoice(order_id, str(Path(directory) / filename))
+        path = order_service.export_order_invoice(order_id, str(Path(directory) / filename), document_title="Quote" if document_kind == "quote" else None)
         content = path.read_bytes()
     return BinaryDownload(filename=filename, content_type="application/pdf", content=content)
 
@@ -3577,6 +4062,8 @@ class BridgeApplication:
             return HTTPStatus.OK, order_metrics()
         if method == "GET" and path == "/api/order-options":
             return HTTPStatus.OK, order_options()
+        if method == "POST" and path == "/api/order-templates":
+            return HTTPStatus.CREATED, save_order_template(body or {})
         if method == "GET" and path in {"/api/customers", "/api/products"}:
             query = parse_qs(parsed.query)
             term = query.get("query", [""])[0]
@@ -3642,6 +4129,12 @@ class BridgeApplication:
             return HTTPStatus.OK, home_workspace()
         if method == "GET" and path == "/api/about":
             return HTTPStatus.OK, about_workspace()
+        if method == "GET" and path == "/api/updates/check":
+            return HTTPStatus.OK, update_workspace()
+        if method == "GET" and path == "/api/health-center":
+            return HTTPStatus.OK, health_center_workspace()
+        if method == "GET" and path == "/api/diagnostics/export":
+            return HTTPStatus.OK, diagnostics_download()
         if method == "GET" and path == "/api/goals":
             return HTTPStatus.OK, goals_workspace()
         if method == "POST" and path == "/api/goals":
@@ -3660,6 +4153,12 @@ class BridgeApplication:
             return HTTPStatus.OK, save_dashboard_logo(body or {})
         if method == "DELETE" and path == "/api/settings/logo":
             return HTTPStatus.OK, delete_dashboard_logo(body or {})
+        if method == "GET" and path == "/api/settings/background":
+            return HTTPStatus.OK, download_background_image(parse_qs(parsed.query).get("theme", [""])[0])
+        if method == "POST" and path == "/api/settings/background":
+            return HTTPStatus.OK, save_background_image(body or {})
+        if method == "DELETE" and path == "/api/settings/background":
+            return HTTPStatus.OK, delete_background_image(body or {})
         if method == "GET" and path == "/api/settings/profile/avatar":
             return HTTPStatus.OK, download_profile_avatar()
         if method == "POST" and path == "/api/settings/profile/avatar":
