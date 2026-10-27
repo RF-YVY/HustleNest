@@ -849,7 +849,7 @@ def export_order_report(rows: Iterable[OrderReportRow], destination: str) -> Pat
                     row.item_count,
                     f"{row.total_amount:.2f}",
                     f"{getattr(row, 'freebie_cost', 0.0):.2f}",
-                    f"{getattr(row, 'net_revenue', row.total_amount - getattr(row, 'freebie_cost', 0.0)):.2f}",
+                    f"{getattr(row, 'net_revenue', row.total_amount):.2f}",
                     f"{tax_amount:.2f}",
                     f"{display_total:.2f}",
                     f"{getattr(row, 'total_cost', 0.0):.2f}",

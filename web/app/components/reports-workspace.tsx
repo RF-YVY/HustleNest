@@ -39,7 +39,7 @@ const reportExports = [
 ];
 
 const cpaOptions = [
-  ["summary_csv", "Financial summary CSV"], ["orders_csv", "Order detail CSV"],
+  ["summary_csv", "Order performance summary CSV"], ["books_csv", "Bookkeeping journal CSV"], ["books_summary_csv", "Bookkeeping financial summary CSV"], ["accounts_csv", "Account balances CSV"], ["bank_csv", "Bank statement matches CSV"], ["bank_corrections_csv", "Statement import correction history CSV"], ["reconciliations_csv", "Bank reconciliations CSV"], ["expense_review_csv", "Expense classifications CSV"], ["loss_review_csv", "Write-off classifications CSV"], ["orders_csv", "Order detail CSV"],
   ["expenses_csv", "Expenses CSV"], ["losses_csv", "Recorded losses CSV"],
   ["zero_sale_csv", "$0 replacement items CSV"], ["sales_pdf", "Sales report PDF"],
   ["pnl_pdf", "Profit & loss PDF"], ["customer_pdf", "Customer report PDF"],
@@ -123,7 +123,7 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
     <div className="workspace reports-page">
       {cpaDialog ? <CPAPackageDialog query={exportQuery.toString()} onClose={() => setCpaDialog(false)} /> : null}
       <div className="page-heading reports-heading">
-        <div><div className="eyebrow"><span>Understand</span><ChevronRight size={14} /><span>Reports</span></div><h1>Reports</h1><p>Turn sales, costs, and fulfillment activity into the next useful decision.</p></div>
+        <div><div className="eyebrow"><span>Understand</span><ChevronRight size={14} /><span>Reports</span></div><h1>Reports</h1><p>Order performance based on order dates. Use Books & Banking for dated financial transactions.</p></div>
         <div className="report-heading-actions"><label className="report-period"><span>Reporting period</span><select aria-label="Reporting period" value={period} onChange={(event) => void selectPeriod(event.target.value)} disabled={loading}>{periods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{period === "custom_range" ? <><label className="report-date"><span>From</span><input aria-label="Report start date" type="date" value={customStart} max={customEnd || undefined} onChange={(event) => setCustomStart(event.target.value)} /></label><label className="report-date"><span>To</span><input aria-label="Report end date" type="date" value={customEnd} min={customStart || undefined} onChange={(event) => setCustomEnd(event.target.value)} /></label><button className="secondary-button report-apply" onClick={() => void applyCustomRange()} disabled={loading || !customStart || !customEnd || customEnd < customStart}>Apply</button></> : null}<label className="report-period"><span>Export</span><select aria-label="Report export type" value={exportKind} onChange={(event) => setExportKind(event.target.value)}>{reportExports.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><a className="secondary-button report-download" aria-disabled={loading} onClick={(event) => { if (loading || exportKind === "cpa_zip") event.preventDefault(); if (!loading && exportKind === "cpa_zip") setCpaDialog(true); }} href={`${bridgeUrl}/api/reports/export?${exportQuery.toString()}`}><Download size={15} /> Download</a></div>
       </div>
       <p className="quiet-empty">Applied dates: {reports?.period.start ?? "All history"} through {reports?.period.end ?? "today"} (inclusive). Downloads use these applied dates. Inventory is a current snapshot; comparisons use the preceding period of the same length.</p>
@@ -135,9 +135,9 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
       </section>
 
       <article className="report-card">
-        <div className="report-card-heading"><h2>Completed $0 items / replacement losses</h2><strong>{money(reports?.metrics.zero_sale_cost ?? 0)}</strong></div>
+        <div className="report-card-heading"><h2>Completed $0 items / replacement costs</h2><strong>{money(reports?.metrics.zero_sale_cost ?? 0)}</strong></div>
         <p>Cost of goods: {money(reports?.metrics.cost_of_goods ?? 0)}. Replacement costs below are already included in gross profit and are not deducted again.</p>
-        {reports?.zero_sale_items?.map((item, index) => <p key={`${item.order_id}-${index}`}><button className="secondary-button" onClick={() => onOpenOrder(item.order_id)}>{item.number} · {item.customer} · {item.product} × {item.quantity} · $0.00 revenue · {money(item.cost)} cost · {money(item.profit)} loss</button></p>)}
+        {reports?.zero_sale_items?.map((item, index) => <p key={`${item.order_id}-${index}`}><button className="secondary-button" onClick={() => onOpenOrder(item.order_id)}>{item.number} · {item.customer} · {item.product} × {item.quantity} · $0.00 revenue · {money(item.cost)} cost · {money(item.profit)} contribution</button></p>)}
         {!reports?.zero_sale_items?.length ? <p>No completed $0 items in this period.</p> : null}
         <p>Record replacement items at $0 with actual costs and a remake note; mark Shipped when fulfilled. Download the CPA package for summary and supporting order, expense, and loss details.</p>
       </article>

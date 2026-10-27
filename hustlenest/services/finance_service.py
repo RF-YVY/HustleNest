@@ -6,6 +6,7 @@ from typing import Iterable, Optional
 
 from ..data import expense_repository, loss_repository, order_repository
 from ..data.database import create_connection
+from . import bookkeeping_service
 from ..models.order_models import OutstandingOrder
 
 
@@ -23,24 +24,38 @@ class CashFlowSummary:
 
 def calculate_loss_total(*, start_date: Optional[date] = None, end_date: Optional[date] = None) -> float:
     losses = loss_repository.fetch_losses(start_date=start_date, end_date=end_date)
-    return sum(loss.amount for loss in losses)
+    return sum(loss.amount for loss in bookkeeping_service.operating_losses(losses))
 
 
 def calculate_expense_total(*, start_date: Optional[date] = None, end_date: Optional[date] = None) -> float:
     expenses = expense_repository.list_expenses(start_date=start_date, end_date=end_date)
-    return sum(expense.amount for expense in expenses)
+    return sum(expense.amount for expense in bookkeeping_service.operating_expenses(expenses))
 
 
 def summarize_cash_flow(window_days: int = 30) -> CashFlowSummary:
     today = date.today()
     start_window = today - timedelta(days=window_days)
 
-    sales_realized = _fetch_sales_total(start_window, today)
-    receivables = _sum_receivables(order_repository.fetch_outstanding_orders())
-    expenses_paid = calculate_expense_total(start_date=start_window, end_date=today)
-    losses_recorded = calculate_loss_total(start_date=start_window, end_date=today)
+    # Only explicit dated book receipts are realized cash. Legacy order flags have no reliable payment date.
+    books = bookkeeping_service.workspace(start_window, today)
+    sales_realized = sum(float(entry["amount"]) for entry in books["entries"] if entry["is_bank"] and (entry["kind"] in {"receipt", "refund"} or entry["original_kind"] in {"receipt", "refund"}))
+    receivables = 0.0
+    for order in order_repository.fetch_order_report(None, today):
+        actual = order_repository.fetch_order(order.order_id)
+        if actual is None or actual.is_paid:
+            continue
+        with create_connection() as connection:
+            workflow = connection.execute('SELECT amount_paid FROM order_workflow WHERE order_id=?', (order.order_id,)).fetchone()
+            posted = connection.execute("""SELECT COALESCE(SUM(-e.cents),0) AS paid
+                FROM book_entries e JOIN book_transactions t ON t.id=e.transaction_id JOIN book_accounts a ON a.id=e.account_id
+                WHERE t.order_id=? AND a.code IN ('sales','refunds','tax') AND (t.kind IN ('receipt','refund') OR (SELECT kind FROM book_transactions original WHERE original.id=t.reversed_id) IN ('receipt','refund'))""", (order.order_id,)).fetchone()
+        posted_paid = float(posted['paid']) / 100
+        paid = max(float(workflow["amount_paid"]) if workflow else 0.0, posted_paid)
+        receivables += max(0.0, actual.display_total - paid)
+    expenses_paid = -sum(float(entry["amount"]) for entry in books["entries"] if entry["is_bank"] and (entry["kind"] in {"expense", "fee", "inventory_purchase", "equipment_purchase"} or entry["original_kind"] in {"expense", "fee", "inventory_purchase", "equipment_purchase"}))
+    losses_recorded = 0.0  # A noncash write-off is not another cash payment.
     recurring_upcoming = _sum_upcoming_recurring(window_days)
-    projected_tax = order_repository.fetch_tax_total(start_window, today)
+    projected_tax = 0.0  # Tax movements are tracked explicitly in Books & Banking.
 
     net_projection = (
         sales_realized
@@ -66,7 +81,7 @@ def summarize_cash_flow(window_days: int = 30) -> CashFlowSummary:
 def _fetch_sales_total(start_date: date, end_date: date) -> float:
     query = """
         SELECT
-            COALESCE(SUM(total_amount + tax_amount), 0) AS total_value
+            COALESCE(SUM(total_amount), 0) AS total_value
         FROM orders
         WHERE UPPER(TRIM(status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
           AND deleted_at IS NULL

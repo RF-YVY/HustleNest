@@ -1,4 +1,4 @@
-export type WorkspaceView = "home" | "orders" | "customers" | "products" | "materials" | "vendors" | "finance" | "reports" | "history" | "geography" | "documents" | "trash" | "settings";
+export type WorkspaceView = "home" | "orders" | "customers" | "products" | "materials" | "vendors" | "finance" | "books" | "reports" | "history" | "geography" | "documents" | "trash" | "settings";
 
 export type OrderActivity = {
   id: number;

@@ -19,7 +19,6 @@ import {
   Mail,
   MapPin,
   Moon,
-  MoreHorizontal,
   Package,
   PackageCheck,
   Paperclip,
@@ -37,6 +36,7 @@ import type { CSSProperties } from "react";
 import { AppNavigation } from "./components/app-navigation";
 import { CustomersWorkspace } from "./components/customers-workspace";
 import { DocumentsWorkspace } from "./components/documents-workspace";
+import { BooksWorkspace } from "./components/books-workspace";
 import { FinanceWorkspace } from "./components/finance-workspace";
 import { GlobalSearch, type GlobalSearchResult } from "./components/global-search";
 import { GoalPanel } from "./components/goal-panel";
@@ -257,6 +257,7 @@ function mapBridgeOrder(order: BridgeOrder): Order {
 }
 
 export default function HustleNestWorkspace() {
+  const [focusedBookOrderId, setFocusedBookOrderId] = useState<number | null>(null);
   const [activeView, setActiveView] = useState<WorkspaceView>("home");
   const [orders, setOrders] = useState(initialOrders);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -384,7 +385,7 @@ export default function HustleNestWorkspace() {
 
   useEffect(() => {
     document.documentElement.style.fontSize = `${(settings?.appearance.text_scale ?? 1) * 100}%`;
-    return () => document.documentElement.style.removeProperty("font-size");
+    return () => { document.documentElement.style.removeProperty("font-size"); };
   }, [settings?.appearance.text_scale]);
 
   useEffect(() => {
@@ -620,7 +621,7 @@ export default function HustleNestWorkspace() {
       setOrders((current) => current.map((item) => item.id === updated.id && item.live ? updated : item));
       setCancelCandidate(null);
       await refreshOrderMetrics();
-      setBridgeMessage(updated.record_type === "quote" ? `${updated.number} cancelled.` : `${updated.number} cancelled and its product inventory restored.`);
+      setBridgeMessage(updated.recordType === "quote" ? `${updated.number} cancelled.` : `${updated.number} cancelled and its product inventory restored.`);
       setReloadKey((value) => value + 1);
     } catch (error: unknown) {
       setBridgeMessage(error instanceof Error ? error.message : "The order could not be cancelled.");
@@ -957,7 +958,7 @@ export default function HustleNestWorkspace() {
             <aside className="order-detail" aria-label={`Order ${selected.number} details`}>
               <div className="detail-topline">
                 <span className={statusClass(selected.status)}>{selected.status}</span>
-                <button className="icon-button" aria-label="More order actions"><MoreHorizontal size={19} /></button>
+                {selected.live ? <button className="secondary-button" title="Record an actual dated payment or refund in the books" onClick={() => { setFocusedBookOrderId(selected.id); setActiveView("books"); }}>Payment / refund</button> : null}
               </div>
               <div className="detail-title">
                 <div><span>{selected.number}</span><h2>{selected.customer}</h2></div>
@@ -987,7 +988,7 @@ export default function HustleNestWorkspace() {
                   </button>
                 ) : null}
                 <button className="secondary-button" onClick={() => void downloadSelectedInvoice()} disabled={!selected.live || lifecycleAction === "invoice"}><FileText size={17} /> {selected.paid ? "Receipt" : "Invoice"}</button>
-                <button className="secondary-button" onClick={() => void toggleSelectedPayment()} disabled={!selected.live || selected.status === "Cancelled" || lifecycleAction === "payment"}><BadgeDollarSign size={17} /> {lifecycleAction === "payment" ? "Saving…" : selected.paid ? "Mark unpaid" : "Mark paid"}</button>
+                <button className="secondary-button" title="Changes the operational paid status only. Use Payment / refund to record dated money in Books & banking." onClick={() => void toggleSelectedPayment()} disabled={!selected.live || selected.status === "Cancelled" || lifecycleAction === "payment"}><BadgeDollarSign size={17} /> {lifecycleAction === "payment" ? "Saving…" : selected.paid ? "Mark unpaid" : "Mark paid"}</button>
                 {selected.live && selected.status !== "Cancelled" ? (
                   <button className="secondary-button" onClick={() => { setEditingOrder(selected); setComposerOpen(true); }}>
                     Edit order
@@ -1063,6 +1064,8 @@ export default function HustleNestWorkspace() {
           <MaterialsWorkspace key={`materials-${focusedMaterialId ?? "list"}-${reloadKey}`} materials={materials} focusMaterialId={focusedMaterialId} onEdit={editMaterial} onAdjust={setAdjustingMaterial} onOpenProduct={(id) => { setFocusedProductId(id); setActiveView("products"); }} />
         ) : activeView === "vendors" ? (
           <VendorsWorkspace key={`vendors-${focusedVendorId ?? "list"}-${reloadKey}`} vendors={vendors} onOpenMaterial={openMaterial} focusVendorId={focusedVendorId} onEdit={editVendor} />
+        ) : activeView === "books" ? (
+          <BooksWorkspace initialOrderId={focusedBookOrderId} onOpenOrder={openOrder} onChanged={() => setReloadKey((value) => value + 1)} />
         ) : activeView === "finance" ? (
           <FinanceWorkspace key={`finance-${focusedFinance?.mode ?? "list"}-${focusedFinance?.id ?? 0}-${reloadKey}`} finance={finance} onOpenOrder={openOrder} onOpenMaterial={openMaterial} focusMode={focusedFinance?.mode} focusId={focusedFinance?.id} onEditExpense={editExpense} onEditRecurring={editRecurring} onEditLoss={editLoss} />
         ) : activeView === "reports" ? (

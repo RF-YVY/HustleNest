@@ -59,7 +59,7 @@ export function HomeWorkspace({
         <article className="metric-card accent-card"><div className="metric-icon"><ShoppingBag size={20} /></div><div><span>Open orders</span><strong>{home?.metrics.open_orders ?? 0}</strong><small><ArrowUpRight size={13} /> Active fulfillment queue</small></div></article>
         <article className="metric-card"><div className="metric-icon violet"><CircleDollarSign size={20} /></div><div><span>Revenue this year</span><strong>{money(home?.metrics.revenue_ytd ?? 0)}</strong><small>Connected order revenue</small></div></article>
         <article className="metric-card"><div className="metric-icon amber"><TrendingUp size={20} /></div><div><span>Net after overhead</span><strong>{money(home?.metrics.net_ytd ?? 0)}</strong><small>Profit less expenses and losses</small></div></article>
-        <article className="metric-card"><div className="metric-icon rose"><CalendarClock size={20} /></div><div><span>30-day cash outlook</span><strong>{money(home?.metrics.cash_projection_30 ?? 0)}</strong><small>Sales, receivables, and obligations</small></div></article>
+        <article className="metric-card"><div className="metric-icon rose"><CalendarClock size={20} /></div><div><span title="Recent recorded receipts less spending, plus remaining order balances, less upcoming obligations. Not a bank balance.">Cash activity + receivables</span><strong>{money(home?.metrics.cash_projection_30 ?? 0)}</strong><small>Dated receipts, balances and obligations</small></div></article>
       </section> : null}
 
       <section className="home-grid">

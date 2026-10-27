@@ -7,7 +7,6 @@ import {
   Home,
   History,
   MapPinned,
-  MoreHorizontal,
   Package,
   Settings,
   ShoppingBag,
@@ -75,7 +74,8 @@ export function AppNavigation({
         { label: "Products", icon: Package, view: "products", count: productCount },
         { label: "Materials", icon: Boxes, view: "materials", count: materialCount },
         { label: "Vendors", icon: Factory, view: "vendors", count: vendorCount },
-        { label: "Finance", icon: WalletCards, view: "finance", count: expenseCount },
+        { label: "Expenses & costs", icon: WalletCards, view: "finance", count: expenseCount },
+        { label: "Books & banking", icon: WalletCards, view: "books" },
       ],
     },
     {
@@ -121,11 +121,10 @@ export function AppNavigation({
       </nav>
       <div className="sidebar-footer">
         <button className={activeView === "settings" ? "nav-item active" : "nav-item"} onClick={() => onNavigate("settings")} aria-current={activeView === "settings" ? "page" : undefined}><Settings size={18} /><span>Settings</span></button>
-        <button className="profile profile-button" onClick={() => onNavigate("settings")} aria-label="Edit owner profile">
+        <div className="profile" aria-label="Business owner">
           <div className={`avatar avatar-owner${profileAvatarAvailable ? " has-photo" : ""}`}>{profileAvatarAvailable ? <img src={`${bridgeUrl}/api/settings/profile/avatar?v=${brandingRevision ?? "current"}`} alt="" /> : profileInitials || "?"}</div>
           <div><strong>{profileName || "Owner"}</strong><span>{profileRole || "Owner"}</span></div>
-          <MoreHorizontal size={18} />
-        </button>
+        </div>
       </div>
     </aside>
   );

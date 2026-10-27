@@ -53,7 +53,8 @@ def summarize_by_category(
     *, start_date: Optional[date] = None, end_date: Optional[date] = None
 ) -> Dict[str, float]:
     summary: Dict[str, float] = defaultdict(float)
-    for expense in list_expenses(start_date=start_date, end_date=end_date):
+    from .bookkeeping_service import operating_expenses
+    for expense in operating_expenses(list_expenses(start_date=start_date, end_date=end_date)):
         summary[expense.category] += float(expense.amount)
     return dict(summary)
 

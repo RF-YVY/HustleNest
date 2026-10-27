@@ -448,6 +448,8 @@ def initialize() -> None:
         _ensure_column(connection, "orders", "deleted_at", "TEXT")
         _ensure_column(connection, "products", "deleted_at", "TEXT")
 
+        from ..services.bookkeeping_service import initialize_schema
+        initialize_schema(connection)
         cursor.close()
         connection.commit()
 

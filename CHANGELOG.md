@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## v4.3.0 — October 27, 2026
+
+- Added experimental-use, no-warranty, independent-records and backup disclaimer in Settings/About.
+
+- Added cent-based balanced bookkeeping, dated receipts/refunds and optional order payment synchronization.
+- Added bank/card statement import, duplicate protection, matching, correction history, reconciliation, period closing and accountant adjustments.
+- Added expense/write-off classifications to avoid duplicate operational deductions and expanded CPA exports.
+- Corrected free-item revenue/margin labeling and partial-payment outlook; preserve actual financial postings after order cancellation/trash.
+- Added guided task navigation, contextual help, order payment shortcut and responsive forms; removed inactive ellipses and redundant owner navigation.
+
 ## v4.2.4 — October 27, 2026
 
 - Added CPA ZIP contents dialog with individual CSV/PDF selections.

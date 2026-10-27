@@ -40,7 +40,7 @@ from .data.database import close_database_for_replacement, create_connection, ge
 from .models.order_models import BusinessGoal, CostComponent, CRMContact, CRMInteraction, DocumentRecord, Expense, GoalCheckpoint, LossRecord, Material, Order, OrderItem, PaymentOption, Product, RecurringExpense, Vendor
 from .browser_launcher import available_browsers, launch_configured_browser
 from .versioning import APP_VERSION, RELEASES_URL, REPOSITORY_URL, check_for_updates
-from .services import cloud_sync_service, crm_service, finance_service, goal_service, import_service, order_service, report_service, soft_delete_service
+from .services import bookkeeping_service, cloud_sync_service, crm_service, finance_service, goal_service, import_service, order_service, report_service, soft_delete_service
 
 
 LOGGER = logging.getLogger("hustlenest.web_bridge")
@@ -852,8 +852,8 @@ def reports_workspace(
     cost = sum(order.total_cost for order in orders)
     zero_sales = report_service.zero_sale_details(start, end)
     gross_profit = revenue - cost
-    expense_total = sum(item.amount for item in expenses)
-    loss_total = sum(item.amount for item in losses)
+    expense_total = sum(item.amount for item in bookkeeping_service.operating_expenses(expenses))
+    loss_total = sum(item.amount for item in bookkeeping_service.operating_losses(losses))
     net = gross_profit - expense_total - loss_total
 
     previous_revenue = 0.0
@@ -959,7 +959,7 @@ def about_workspace() -> dict[str, str]:
     return {
         "app_name": "HustleNest",
         "app_version": APP_VERSION,
-        "browser_version": "4.2.4",
+        "browser_version": "4.3.0",
         "repository_url": REPOSITORY_URL,
         "releases_url": RELEASES_URL,
         "runtime": "Local Python backend + browser UI",
@@ -1007,7 +1007,7 @@ def report_download(query: dict[str, list[str]]) -> BinaryDownload:
             import csv
             import zipfile
             from dataclasses import asdict
-            csv_files = {"summary_csv": "summary.csv", "orders_csv": "orders.csv", "zero_sale_csv": "zero_sale_items.csv", "expenses_csv": "expenses.csv", "losses_csv": "recorded_losses.csv"}
+            csv_files = {"summary_csv": "summary.csv", "orders_csv": "orders.csv", "zero_sale_csv": "zero_sale_items.csv", "expenses_csv": "expenses.csv", "losses_csv": "recorded_losses.csv", "books_csv": "book_entries.csv", "books_summary_csv": "book_summary.csv", "bank_csv": "bank_statement_rows.csv", "accounts_csv": "account_balances.csv", "reconciliations_csv": "bank_reconciliations.csv", "expense_review_csv": "expense_classification.csv", "loss_review_csv": "writeoff_classification.csv", "bank_corrections_csv": "bank_import_corrections.csv"}
             pdf_kinds = {"sales_pdf", "pnl_pdf", "customer_pdf", "inventory_pdf", "comparison_pdf", "tax_pdf"}
             selected = set(query.get("include", list(csv_files)))
             if not selected or selected - (set(csv_files) | pdf_kinds):
@@ -1026,6 +1026,15 @@ def report_download(query: dict[str, list[str]]) -> BinaryDownload:
             write_csv("expenses.csv", [asdict(i) for i in expense_repository.list_expenses(start_date=start, end_date=end)], ["id", "expense_date", "category", "amount", "description", "payment_method", "vendor_id", "document_id", "notes"])
             write_csv("recorded_losses.csv", [asdict(i) for i in loss_repository.fetch_losses(start_date=start, end_date=end)], ["id", "loss_date", "category", "amount", "description", "details", "quantity", "order_id", "product_name", "material_name"])
             (root / "README.txt").write_text(f"{settings.business_name} - CPA supporting reports\nPeriod: {start or 'All history'} through {end}, inclusive. Generated {datetime.now().isoformat()}\nUSD. Orders use order date; expenses and recorded losses use their own dates.\nOrder-based management reporting, not a cash-basis tax return. Active unfulfilled orders are included; quotes, drafts, cancelled and deleted orders are excluded. Sales tax is separate from revenue.\nGross profit = revenue - cost_of_goods. Net = gross profit - expenses - recorded losses.\nzero_sale_cost is already included in COGS, not an additional deduction. Shipped means fulfilled. Zero-price lines in mixed paid orders are included. Costs reflect saved item costs; review missing costs.\nReview separately entered expenses and losses against order costs for duplicates. Retain receipts and invoices. Payment timing, bank reconciliation, depreciation and tax adjustments require separate CPA review.\n", encoding="utf-8")
+            books = bookkeeping_service.workspace(start or date(1, 1, 1), end)
+            write_csv("book_summary.csv", [{"metric": key, "value": value} for key, value in books["metrics"].items()], ["metric", "value"])
+            write_csv("book_entries.csv", books["entries"], ["transaction_id", "entry_id", "transaction_date", "kind", "account", "account_kind", "amount", "description", "reference", "order_id", "expense_id", "document_id", "reversed_id", "bank_row_id", "source_snapshot"])
+            write_csv("bank_statement_rows.csv", books["bank_rows"], ["id", "account_id", "transaction_date", "description", "amount", "reference", "matched_entry_id"])
+            write_csv("account_balances.csv", books["accounts"], ["id", "name", "kind", "balance", "displayed_balance"])
+            write_csv("bank_reconciliations.csv", books["reconciliations"], ["id", "account", "end_date", "ending_balance", "created_at"])
+            write_csv("expense_classification.csv", books["expenses"], ["id", "expense_date", "category", "amount", "treatment", "review_note", "book_transaction_id", "document_id"])
+            write_csv("writeoff_classification.csv", books["losses"], ["id", "expense_date", "category", "amount", "treatment", "review_note"])
+            write_csv("bank_import_corrections.csv", books["bank_corrections"], ["id", "bank_row_id", "original_json", "reason", "changed_at"])
             for report_kind, csv_name in csv_files.items():
                 if report_kind not in selected:
                     (root / csv_name).unlink()
@@ -1035,6 +1044,7 @@ def report_download(query: dict[str, list[str]]) -> BinaryDownload:
                 download = report_download(child_query)
                 (root / download.filename).write_bytes(download.content)
             with (root / "README.txt").open("a", encoding="utf-8") as manifest:
+                manifest.write(books["notes"] + "\nBooks closed through: " + str(books["closed_through"] or "Not closed") + "\n")
                 manifest.write("Selected reports: " + ", ".join(sorted(selected)) + "\n")
             filename = f"{business}_CPA_{label_stem}.zip"
             path = root / filename
@@ -4225,6 +4235,30 @@ class BridgeApplication:
             except ValueError as exc:
                 raise BridgeError("invalid_limit", "Limit must be a number.", HTTPStatus.BAD_REQUEST) from exc
             return HTTPStatus.OK, search_vendors(term, limit)
+        if path.startswith("/api/books"):
+            try:
+                query = parse_qs(parsed.query)
+                if method == "GET" and path == "/api/books":
+                    return HTTPStatus.OK, bookkeeping_service.workspace(query.get("start", [None])[0], query.get("end", [None])[0])
+                actions = {
+                    "/api/books/accounts": bookkeeping_service.create_account,
+                    "/api/books/transactions": bookkeeping_service.post_transaction,
+                    "/api/books/reverse": bookkeeping_service.reverse_transaction,
+                    "/api/books/journal": bookkeeping_service.post_adjustment,
+                    "/api/books/import": bookkeeping_service.import_bank_rows,
+                    "/api/books/correct-import": bookkeeping_service.correct_bank_row,
+                    "/api/books/match": bookkeeping_service.match_bank_row,
+                    "/api/books/unmatch": bookkeeping_service.unmatch_bank_row,
+                    "/api/books/reconcile": bookkeeping_service.reconcile,
+                    "/api/books/close": bookkeeping_service.close_period,
+                    "/api/books/review-expense": bookkeeping_service.review_expense,
+                    "/api/books/review-loss": bookkeeping_service.review_loss,
+                }
+                if method == "POST" and path in actions:
+                    result = actions[path](body or {})
+                    return HTTPStatus.OK, {"result": result}
+            except (ValueError, TypeError, sqlite3.IntegrityError) as exc:
+                raise BridgeError("books_validation", str(exc), HTTPStatus.BAD_REQUEST) from exc
         if method == "GET" and path == "/api/finance":
             query = parse_qs(parsed.query)
             try:

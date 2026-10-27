@@ -39,7 +39,7 @@ def zero_sale_details(start_date=None, end_date=None):
 def _zero_sale_html(start, end):
     from html import escape
     rows = zero_sale_details(start, end)
-    html = "<h2>Completed $0 items / replacement losses</h2><p>Costs below are already included in cost of goods sold; do not deduct again. Uses order date; Shipped means fulfilled.</p><table><tr><th>Order / Customer</th><th>Product</th><th>Qty</th><th>Revenue</th><th>Cost</th><th>Profit / Loss</th><th>Notes</th></tr>"
+    html = "<h2>Completed $0 items / replacement costs</h2><p>Costs below are already included in cost of goods sold; do not deduct again. Uses order date; Shipped means fulfilled.</p><table><tr><th>Order / Customer</th><th>Product</th><th>Qty</th><th>Revenue</th><th>Cost</th><th>Net contribution</th><th>Notes</th></tr>"
     for r in rows:
         html += f"<tr><td>{escape(r['number'])} / {escape(r['customer'])}</td><td>{escape(r['product'])}</td><td>{r['quantity']}</td><td>$0.00</td><td>{_format_currency(r['cost'])}</td><td>{_format_currency(r['profit'])}</td><td>{escape(r['notes'])}</td></tr>"
     return html + "</table>"

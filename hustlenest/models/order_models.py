@@ -210,7 +210,7 @@ class OrderReportRow:
 
     @property
     def net_revenue(self) -> float:
-        return self.total_amount - self.freebie_cost
+        return self.total_amount
 
     @property
     def total_with_tax(self) -> float:

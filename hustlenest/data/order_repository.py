@@ -1485,7 +1485,7 @@ def build_dashboard_snapshot() -> DashboardSnapshot:
     total_sales, total_cost, freebie_cost, paid_sales, unpaid_sales = fetch_financial_totals()
     tax_total = fetch_tax_total()
     total_profit = total_sales - total_cost
-    net_sales = total_sales - freebie_cost
+    net_sales = total_sales
     if net_sales > 0:
         margin = total_profit / net_sales
     elif total_sales > 0:

@@ -1,10 +1,20 @@
 # HustleNest
 
-Version: **v4.2.4**
+Version: **v4.3.0**
 
 HustleNest is a local-first business workspace with a browser interface and a Python backend. It brings orders, customers, inventory, vendors, finance, reports, documents, and settings into one smooth workflow while keeping business data in a local SQLite database.
 
 ![HustleNest v4.0 sales geography](docs/images/hustlenest-v4-geography.png)
+
+## Experimental software
+
+HustleNest is experimental and provided as is, without warranties to the extent permitted by applicable law. Use at your own risk. Do not rely on it as your sole business or bookkeeping system. Keep independent records, regular separate-location data backups and copies of supporting documents; verify that backups can be restored. Review financial outputs with a qualified professional. The full notice is in Settings → About & disclaimer.
+
+## Bookkeeping in 4.3
+
+Books & banking provides a guided flow for accounts, dated money records, statement matching, cost review, and period closing. It uses balanced entries in integer cents and keeps real payments/refunds even when operational orders are cancelled or trashed. CPA exports include a separate book summary, journal, account balances, statement matches, reconciliations, classifications, and import-correction history.
+
+Existing order/payment flags are not automatically converted to dated accounting entries. Start with CPA-reviewed opening balances or verified historical transactions. See [the bookkeeping guide](docs/BOOKKEEPING_GUIDE.md) for setup, examples, and reporting limits.
 
 ## Reporting in 4.2.4
 

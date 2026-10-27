@@ -69,11 +69,11 @@ export function FinanceWorkspace({
   return (
     <div className="workspace entity-page finance-page">
       <div className="page-heading">
-        <div><div className="eyebrow"><span>Business</span><ChevronRight size={14} /><span>Finance</span></div><h1>Finance</h1><p>Understand spending, obligations, and operational losses in one place.</p></div>{expense ? <button className="secondary-button" onClick={() => onEditExpense(expense)}><Pencil size={16} /> Edit expense</button> : obligation ? <button className="secondary-button" onClick={() => onEditRecurring(obligation)}><Pencil size={16} /> Edit recurring</button> : loss ? <button className="secondary-button" onClick={() => onEditLoss(loss)}><Pencil size={16} /> Edit loss</button> : null}
+        <div><div className="eyebrow"><span>Business</span><ChevronRight size={14} /><span>Finance</span></div><h1>Expenses & costs</h1><p>Manage spending records and cost classifications. Use Books & banking to record and reconcile actual payments.</p></div>{expense ? <button className="secondary-button" onClick={() => onEditExpense(expense)}><Pencil size={16} /> Edit expense</button> : obligation ? <button className="secondary-button" onClick={() => onEditRecurring(obligation)}><Pencil size={16} /> Edit recurring</button> : loss ? <button className="secondary-button" onClick={() => onEditLoss(loss)}><Pencil size={16} /> Edit loss</button> : null}
       </div>
       <section className="material-metrics finance-metrics" aria-label="Finance summary">
-        <article><TrendingDown size={19} /><div><span>YTD expenses</span><strong>{money(finance?.metrics.year_to_date_expenses ?? 0)}</strong></div></article>
-        <article><CircleAlert size={19} /><div><span>YTD losses</span><strong>{money(finance?.metrics.year_to_date_losses ?? 0)}</strong></div></article>
+        <article><TrendingDown size={19} /><div><span>YTD recorded spending</span><strong>{money(finance?.metrics.year_to_date_expenses ?? 0)}</strong></div></article>
+        <article><CircleAlert size={19} /><div><span>YTD recorded write-offs</span><strong>{money(finance?.metrics.year_to_date_losses ?? 0)}</strong></div></article>
         <article><Repeat2 size={19} /><div><span>Monthly recurring</span><strong>{money(finance?.metrics.recurring_monthly_estimate ?? 0)}</strong></div></article>
         <article><CalendarClock size={19} /><div><span>Due next 30 days</span><strong>{money(finance?.metrics.upcoming_30_days ?? 0)}</strong></div></article>
       </section>
@@ -82,7 +82,7 @@ export function FinanceWorkspace({
           <div className="finance-tabs three" role="tablist" aria-label="Finance records">
             <button className={mode === "expenses" ? "active" : ""} onClick={() => switchMode("expenses")} role="tab" aria-selected={mode === "expenses"}>Expenses <span>{expenses.length}</span></button>
             <button className={mode === "recurring" ? "active" : ""} onClick={() => switchMode("recurring")} role="tab" aria-selected={mode === "recurring"}>Recurring <span>{recurring.length}</span></button>
-            <button className={mode === "losses" ? "active loss-tab" : "loss-tab"} onClick={() => switchMode("losses")} role="tab" aria-selected={mode === "losses"}>Losses <span>{losses.length}</span></button>
+            <button className={mode === "losses" ? "active loss-tab" : "loss-tab"} onClick={() => switchMode("losses")} role="tab" aria-selected={mode === "losses"}>Write-offs <span>{losses.length}</span></button>
           </div>
           <label className="entity-search"><Search size={17} /><input aria-label="Search finance records" placeholder="Search category, context, or notes…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
           <div className="entity-list-heading"><span>{rows.length} {mode}</span><span>Amount</span></div>
@@ -101,7 +101,7 @@ export function FinanceWorkspace({
         </div>
         <aside className="entity-detail">
           {selected ? <>
-            <div className="entity-hero"><div className={obligation ? "finance-mark recurring entity-avatar" : loss ? "finance-mark loss entity-avatar" : "finance-mark entity-avatar"}>{obligation ? <Repeat2 size={24} /> : loss ? <CircleAlert size={24} /> : <ReceiptText size={24} />}</div><div><span>{obligation ? "Recurring obligation" : loss ? "Recorded loss" : "Recorded expense"}</span><h2>{selected.category || "Uncategorized"}</h2><p>{expense ? shortDate(expense.expense_date) : obligation ? `${obligation.frequency} · next ${shortDate(obligation.next_occurrence)}` : shortDate(loss?.loss_date ?? null)}</p></div></div>
+            <div className="entity-hero"><div className={obligation ? "finance-mark recurring entity-avatar" : loss ? "finance-mark loss entity-avatar" : "finance-mark entity-avatar"}>{obligation ? <Repeat2 size={24} /> : loss ? <CircleAlert size={24} /> : <ReceiptText size={24} />}</div><div><span>{obligation ? "Recurring obligation" : loss ? "Recorded write-off" : "Recorded expense"}</span><h2>{selected.category || "Uncategorized"}</h2><p>{expense ? shortDate(expense.expense_date) : obligation ? `${obligation.frequency} · next ${shortDate(obligation.next_occurrence)}` : shortDate(loss?.loss_date ?? null)}</p></div></div>
             <div className="finance-amount"><span>{obligation ? `Every ${obligation.frequency.toLowerCase()}` : loss ? "Value lost" : "Amount paid"}</span><strong>{money(selected.amount)}</strong></div>
             {expense ? <>
               <div className="detail-section customer-summary"><div className="section-heading"><h3>Transaction context</h3></div><p><Factory size={15} /> {expense.vendor?.name || "No vendor assigned"}</p><p><Boxes size={15} /> {expense.material?.name || "No material linked"}</p><p><CreditCard size={15} /> {expense.payment_method || "Payment method not recorded"}</p><p><Repeat2 size={15} /> {expense.is_recurring ? "Created from a recurring expense" : "One-time expense"}</p>{expense.description ? <p><ReceiptText size={15} /> {expense.description}</p> : null}{expense.material_id ? <button className="finance-context-link" onClick={() => onOpenMaterial(expense.material_id!)}>Open linked material <ChevronRight size={14} /></button> : null}</div>
