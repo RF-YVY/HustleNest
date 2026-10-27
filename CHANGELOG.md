@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## v4.2.4 — October 27, 2026
 
+- Added CPA ZIP contents dialog with individual CSV/PDF selections.
+
 - Fixed customer reports including trashed orders in customer totals and rankings.
 - Excluded deleted order revenue, cost, and counts while preserving trash records.
 - Audited cash flow, financial goals, payment totals, tax, and forecasts; excluded trashed/cancelled orders across financial queries.

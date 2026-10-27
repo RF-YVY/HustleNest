@@ -1007,6 +1007,13 @@ def report_download(query: dict[str, list[str]]) -> BinaryDownload:
             import csv
             import zipfile
             from dataclasses import asdict
+            csv_files = {"summary_csv": "summary.csv", "orders_csv": "orders.csv", "zero_sale_csv": "zero_sale_items.csv", "expenses_csv": "expenses.csv", "losses_csv": "recorded_losses.csv"}
+            pdf_kinds = {"sales_pdf", "pnl_pdf", "customer_pdf", "inventory_pdf", "comparison_pdf", "tax_pdf"}
+            selected = set(query.get("include", list(csv_files)))
+            if not selected or selected - (set(csv_files) | pdf_kinds):
+                raise BridgeError("invalid_package_selection", "Choose at least one valid report for the CPA package.", HTTPStatus.BAD_REQUEST)
+            if "comparison_pdf" in selected and start is None:
+                raise BridgeError("validation_failed", "Choose a bounded date range to include a period comparison.", HTTPStatus.BAD_REQUEST)
             report = reports_workspace(period, custom_start, custom_end)
             def write_csv(name, rows, fields):
                 with (root / name).open("w", newline="", encoding="utf-8-sig") as handle:
@@ -1019,6 +1026,16 @@ def report_download(query: dict[str, list[str]]) -> BinaryDownload:
             write_csv("expenses.csv", [asdict(i) for i in expense_repository.list_expenses(start_date=start, end_date=end)], ["id", "expense_date", "category", "amount", "description", "payment_method", "vendor_id", "document_id", "notes"])
             write_csv("recorded_losses.csv", [asdict(i) for i in loss_repository.fetch_losses(start_date=start, end_date=end)], ["id", "loss_date", "category", "amount", "description", "details", "quantity", "order_id", "product_name", "material_name"])
             (root / "README.txt").write_text(f"{settings.business_name} - CPA supporting reports\nPeriod: {start or 'All history'} through {end}, inclusive. Generated {datetime.now().isoformat()}\nUSD. Orders use order date; expenses and recorded losses use their own dates.\nOrder-based management reporting, not a cash-basis tax return. Active unfulfilled orders are included; quotes, drafts, cancelled and deleted orders are excluded. Sales tax is separate from revenue.\nGross profit = revenue - cost_of_goods. Net = gross profit - expenses - recorded losses.\nzero_sale_cost is already included in COGS, not an additional deduction. Shipped means fulfilled. Zero-price lines in mixed paid orders are included. Costs reflect saved item costs; review missing costs.\nReview separately entered expenses and losses against order costs for duplicates. Retain receipts and invoices. Payment timing, bank reconciliation, depreciation and tax adjustments require separate CPA review.\n", encoding="utf-8")
+            for report_kind, csv_name in csv_files.items():
+                if report_kind not in selected:
+                    (root / csv_name).unlink()
+            for report_kind in sorted(selected & pdf_kinds):
+                child_query = {key: list(value) for key, value in query.items() if key not in {"include", "kind"}}
+                child_query["kind"] = [report_kind]
+                download = report_download(child_query)
+                (root / download.filename).write_bytes(download.content)
+            with (root / "README.txt").open("a", encoding="utf-8") as manifest:
+                manifest.write("Selected reports: " + ", ".join(sorted(selected)) + "\n")
             filename = f"{business}_CPA_{label_stem}.zip"
             path = root / filename
             with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:

@@ -46,6 +46,29 @@ from hustlenest.services import order_service, report_service, soft_delete_servi
 
 
 class OrdersBridgeTests(unittest.TestCase):
+    def test_cpa_package_includes_only_selected_reports(self):
+        import zipfile
+        from hustlenest.web_bridge import report_download
+        def write_pdf(html, path):
+            Path(path).write_bytes(b"%PDF-selected")
+        with patch.object(order_service, "_write_pdf_from_html", side_effect=write_pdf) as render:
+            download = report_download({"kind": ["cpa_zip"], "period": ["this_year"],
+                "include": ["summary_csv", "customer_pdf", "sales_pdf"]})
+        with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+            names = archive.namelist()
+            self.assertIn("summary.csv", names)
+            self.assertIn("README.txt", names)
+            self.assertEqual(sum(name.endswith(".pdf") for name in names), 2)
+            self.assertTrue(any("CustomerReport" in name for name in names))
+            self.assertTrue(any("SalesReport" in name for name in names))
+            self.assertNotIn("orders.csv", names)
+            self.assertNotIn("expenses.csv", names)
+            self.assertEqual(render.call_count, 2)
+        with self.assertRaises(BridgeError):
+            report_download({"kind": ["cpa_zip"], "include": ["not_a_report"]})
+        with self.assertRaises(BridgeError):
+            report_download({"kind": ["cpa_zip"], "period": ["all_time"], "include": ["comparison_pdf"]})
+
     def test_excluded_orders_do_not_change_financial_totals(self):
         from hustlenest.services import finance_service, goal_service
         from hustlenest.web_bridge import reports_workspace, home_workspace, finance_workspace, order_metrics

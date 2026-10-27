@@ -9,7 +9,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { bridgeUrl, getBridgeData } from "../lib/hustlenest";
 import type { ReportsWorkspaceData } from "../lib/hustlenest";
 
@@ -38,7 +38,52 @@ const reportExports = [
   ["tax_pdf", "Sales tax PDF"],
 ];
 
+const cpaOptions = [
+  ["summary_csv", "Financial summary CSV"], ["orders_csv", "Order detail CSV"],
+  ["expenses_csv", "Expenses CSV"], ["losses_csv", "Recorded losses CSV"],
+  ["zero_sale_csv", "$0 replacement items CSV"], ["sales_pdf", "Sales report PDF"],
+  ["pnl_pdf", "Profit & loss PDF"], ["customer_pdf", "Customer report PDF"],
+  ["tax_pdf", "Sales tax PDF"], ["comparison_pdf", "Period comparison PDF"],
+  ["inventory_pdf", "Inventory PDF (current snapshot)"],
+];
+
+function CPAPackageDialog({ query, onClose }: { query: string; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [selected, setSelected] = useState(cpaOptions.filter(([key]) => !["comparison_pdf", "inventory_pdf"].includes(key)).map(([key]) => key));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const allTime = new URLSearchParams(query).get("period") === "all_time";
+  useEffect(() => { dialog.current?.showModal(); }, []);
+  const generate = async () => {
+    setBusy(true); setError("");
+    try {
+      const params = new URLSearchParams(query);
+      selected.forEach((key) => params.append("include", key));
+      const response = await fetch(`${bridgeUrl}/api/reports/export?${params}`);
+      if (!response.ok) throw new Error("Could not generate the CPA package. Please try again.");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)/)?.[1] ?? "CPA_Package.zip";
+      document.body.appendChild(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      onClose();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Download failed."); }
+    finally { setBusy(false); }
+  };
+  return <dialog className="cpa-package-dialog" ref={dialog} aria-labelledby="cpa-package-title" onCancel={(event) => { if (busy) event.preventDefault(); }} onClose={onClose}>
+    <h2 id="cpa-package-title">Choose CPA package contents</h2>
+    <p>Choose the CSV details and PDF reports to include. Reports use the applied dates; inventory is a current snapshot. Reporting notes are always included.</p>
+    <fieldset disabled={busy}><legend>Include in ZIP</legend>{cpaOptions.map(([key, label]) => <label key={key}><input type="checkbox" checked={selected.includes(key)} disabled={allTime && key === "comparison_pdf"} onChange={(event) => setSelected((current) => event.target.checked ? [...current, key] : current.filter((item) => item !== key))} />{label}</label>)}</fieldset>
+    {allTime ? <p>Choose a bounded date range to include a period comparison.</p> : null}
+    {error ? <p role="alert">{error}</p> : null}
+    <div className="cpa-package-actions"><button className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || !selected.length} onClick={() => void generate()}>{busy ? "Generating ZIP…" : "Generate ZIP"}</button></div>
+  </dialog>;
+}
+
 export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialReports: ReportsWorkspaceData | null; onOpenOrder: (id: number) => void }) {
+  const [cpaDialog, setCpaDialog] = useState(false);
   const [reports, setReports] = useState(initialReports);
   const [period, setPeriod] = useState(initialReports?.period.key ?? "this_year");
   const [loading, setLoading] = useState(false);
@@ -76,9 +121,10 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
 
   return (
     <div className="workspace reports-page">
+      {cpaDialog ? <CPAPackageDialog query={exportQuery.toString()} onClose={() => setCpaDialog(false)} /> : null}
       <div className="page-heading reports-heading">
         <div><div className="eyebrow"><span>Understand</span><ChevronRight size={14} /><span>Reports</span></div><h1>Reports</h1><p>Turn sales, costs, and fulfillment activity into the next useful decision.</p></div>
-        <div className="report-heading-actions"><label className="report-period"><span>Reporting period</span><select aria-label="Reporting period" value={period} onChange={(event) => void selectPeriod(event.target.value)} disabled={loading}>{periods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{period === "custom_range" ? <><label className="report-date"><span>From</span><input aria-label="Report start date" type="date" value={customStart} max={customEnd || undefined} onChange={(event) => setCustomStart(event.target.value)} /></label><label className="report-date"><span>To</span><input aria-label="Report end date" type="date" value={customEnd} min={customStart || undefined} onChange={(event) => setCustomEnd(event.target.value)} /></label><button className="secondary-button report-apply" onClick={() => void applyCustomRange()} disabled={loading || !customStart || !customEnd || customEnd < customStart}>Apply</button></> : null}<label className="report-period"><span>Export</span><select aria-label="Report export type" value={exportKind} onChange={(event) => setExportKind(event.target.value)}>{reportExports.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><a className="secondary-button report-download" aria-disabled={loading} onClick={(event) => { if (loading) event.preventDefault(); }} href={`${bridgeUrl}/api/reports/export?${exportQuery.toString()}`}><Download size={15} /> Download</a></div>
+        <div className="report-heading-actions"><label className="report-period"><span>Reporting period</span><select aria-label="Reporting period" value={period} onChange={(event) => void selectPeriod(event.target.value)} disabled={loading}>{periods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{period === "custom_range" ? <><label className="report-date"><span>From</span><input aria-label="Report start date" type="date" value={customStart} max={customEnd || undefined} onChange={(event) => setCustomStart(event.target.value)} /></label><label className="report-date"><span>To</span><input aria-label="Report end date" type="date" value={customEnd} min={customStart || undefined} onChange={(event) => setCustomEnd(event.target.value)} /></label><button className="secondary-button report-apply" onClick={() => void applyCustomRange()} disabled={loading || !customStart || !customEnd || customEnd < customStart}>Apply</button></> : null}<label className="report-period"><span>Export</span><select aria-label="Report export type" value={exportKind} onChange={(event) => setExportKind(event.target.value)}>{reportExports.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><a className="secondary-button report-download" aria-disabled={loading} onClick={(event) => { if (loading || exportKind === "cpa_zip") event.preventDefault(); if (!loading && exportKind === "cpa_zip") setCpaDialog(true); }} href={`${bridgeUrl}/api/reports/export?${exportQuery.toString()}`}><Download size={15} /> Download</a></div>
       </div>
       <p className="quiet-empty">Applied dates: {reports?.period.start ?? "All history"} through {reports?.period.end ?? "today"} (inclusive). Downloads use these applied dates. Inventory is a current snapshot; comparisons use the preceding period of the same length.</p>
       <section className={loading ? "metric-grid reports-metrics loading" : "metric-grid reports-metrics"} aria-label="Report summary">

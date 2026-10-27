@@ -2,6 +2,7 @@
 
 **Release date:** October 27, 2026
 
+- Added a CPA package dialog with checkboxes for individual CSVs and PDFs, including sales, profit and loss, customers, tax, comparisons, and current inventory.
 - Fixed customer report PDFs including orders in the trash, which inflated customer order counts, sales, averages, costs, and report totals.
 - Deleted orders now remain excluded from customer summaries, consistent with the main reports and order detail exports.
 - Excluded trashed and cancelled orders from cash-flow calculations, financial goals, payment totals, and product-demand forecasts.
