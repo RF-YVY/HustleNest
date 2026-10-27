@@ -1064,7 +1064,8 @@ def get_customer_sales_summary(start_date: date, end_date: date) -> List[Custome
                 TRIM(o.customer_name) AS customer_name,
                 o.total_amount
             FROM orders AS o
-            WHERE TRIM(o.customer_name) <> ''
+            WHERE o.deleted_at IS NULL
+              AND TRIM(o.customer_name) <> ''
               AND UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
               AND o.order_date >= ?
               AND o.order_date <= ?

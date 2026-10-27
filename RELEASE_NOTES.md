@@ -1,11 +1,9 @@
-# HustleNest v4.2.3
+# HustleNest v4.2.4
 
 **Release date:** October 27, 2026
 
-- Identify fulfilled $0 replacement items and their saved production costs in reports and PDF exports without deducting costs twice.
-- Download a CPA ZIP package with a financial summary, orders, expenses, recorded losses, replacement-item detail, and reporting-basis notes.
-- Scope reports and downloads by date: current/previous month, quarter, year, rolling 30/90 days, all history, or inclusive custom dates.
-- Compare the selected date range with the preceding period of equal length. Inventory exports remain clearly labeled current snapshots.
-- Includes pending launch isolation, invoice, payment, and order workflow fixes.
+- Fixed customer report PDFs including orders in the trash, which inflated customer order counts, sales, averages, costs, and report totals.
+- Deleted orders now remain excluded from customer summaries, consistent with the main reports and order detail exports.
+- Added regression coverage for active, deleted, and cancelled orders.
 
-Download HustleNestSetup.exe and run it to upgrade. Existing data and settings remain in %LOCALAPPDATA%\HustleNest.
+Download and run HustleNestSetup.exe to upgrade, then export the customer report again. Existing data is preserved; no order records need to be edited or permanently deleted.

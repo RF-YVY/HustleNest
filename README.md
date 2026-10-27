@@ -1,12 +1,12 @@
 # HustleNest
 
-Version: **v4.2.3**
+Version: **v4.2.4**
 
 HustleNest is a local-first business workspace with a browser interface and a Python backend. It brings orders, customers, inventory, vendors, finance, reports, documents, and settings into one smooth workflow while keeping business data in a local SQLite database.
 
 ![HustleNest v4.0 sales geography](docs/images/hustlenest-v4-geography.png)
 
-## Reporting in 4.2.3
+## Reporting in 4.2.4
 
 Choose a date preset or apply an inclusive custom range in Reports. Downloads use the applied dates. The CPA package (ZIP) contains a summary and supporting order, expense, recorded-loss, and fulfilled $0-item CSVs with reporting-basis notes. Replacement costs are already included in cost of goods sold and are disclosed without a second deduction. Inventory exports show current stock; comparison exports use the preceding period of equal length.
 

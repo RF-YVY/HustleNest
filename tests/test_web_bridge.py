@@ -46,6 +46,31 @@ from hustlenest.services import order_service, report_service, soft_delete_servi
 
 
 class OrdersBridgeTests(unittest.TestCase):
+    def test_customer_report_excludes_trashed_orders(self):
+        for number, amount, deleted, status in [
+            ("ACTIVE", 825, False, "Shipped"),
+            ("TRASH-1", 807, True, "Ready to Ship"),
+            ("TRASH-2", 807, True, "Ready to Ship"),
+            ("CANCELLED", 807, False, "Cancelled"),
+        ]:
+            order_id = order_repository.insert_order(Order(
+                order_number=number, customer_name="Mark McCoy", customer_address="",
+                order_date=date.today(), status=status,
+                items=[OrderItem(product_name="Caps", product_description="", product_sku="CAP",
+                                 quantity=1, unit_price=amount, base_unit_cost=100)]))
+            if deleted:
+                with create_connection() as connection:
+                    connection.execute("UPDATE orders SET deleted_at = ? WHERE id = ?", (datetime.now().isoformat(), order_id))
+        customers = order_repository.get_customer_sales_summary(date.today(), date.today())
+        mark = next(customer for customer in customers if customer.customer_name == "Mark McCoy")
+        self.assertEqual(mark.order_count, 1)
+        self.assertEqual(mark.total_sales, 825)
+        self.assertEqual(mark.total_cost, 100)
+        self.assertEqual(mark.average_order, 825)
+        html = report_service.generate_customer_report_html(date.today(), date.today(), settings_repository.get_app_settings())
+        self.assertIn("$825.00", html)
+        self.assertNotIn("$2,439.00", html)
+
     def test_report_date_presets_and_inclusive_custom_scope(self):
         from hustlenest.web_bridge import _report_period, reports_workspace, report_download
         today = date.today()

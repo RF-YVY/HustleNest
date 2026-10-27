@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## v4.2.4 — October 27, 2026
+
+- Fixed customer reports including trashed orders in customer totals and rankings.
+- Excluded deleted order revenue, cost, and counts while preserving trash records.
+
 ## v4.2.3 — October 27, 2026
 
 - Added fulfilled $0 item loss disclosure and CPA supporting CSV package.
