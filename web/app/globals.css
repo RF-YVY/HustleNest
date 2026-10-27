@@ -772,6 +772,8 @@ button { color: inherit; }
 .payment-settings-card { grid-column: 1 / -1; }
 .payment-security-note { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--teal) 28%, var(--line)); border-radius: 9px; color: var(--teal); background: var(--teal-soft); font-size: .75rem; }
 .payment-security-note strong { color: var(--ink); }
+.payment-security-note > span { flex: 1; }
+.payment-security-note .secondary-button { flex: 0 0 auto; min-height: 32px; padding: 6px 10px; }
 .payment-method-editor { display: grid; gap: 8px; }
 .payment-method-row { display: grid; grid-template-columns: minmax(150px, .65fr) minmax(240px, 1.35fr) auto; align-items: end; gap: 9px; }
 .payment-method-row label { display: grid; gap: 5px; color: var(--muted); font-size: .6875rem; font-weight: 750; }

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## v4.2.3 — October 27, 2026
+
+- Added fulfilled $0 item loss disclosure and CPA supporting CSV package.
+- Expanded inclusive reporting date presets and aligned downloads with applied dates.
+- Period comparisons follow the selected dates; inventory exports identify current snapshots.
+
+## [4.2.2] - 2026-09-10
+
+### Fixed
+- The browser workspace now uses a fresh available local port, preventing another development server from being mistaken for HustleNest.
+- Frontend startup verifies the HustleNest page identity before opening the browser.
+- Shutdown cleanup targets only the frontend process tree launched by HustleNest.
+- The local data bridge permits the dynamically selected HustleNest browser origin.
+- New sales orders accept an empty quote-expiration value instead of applying quote-only validation.
+- Orders can move backward through workflow statuses, including reopening a shipped order, with guarded updates and audit history.
+- Invoice PDFs show partial payments and remaining balances, align branded headers and address blocks, and resolve managed business logos.
+- Payment-method settings can always be explicitly saved, and packaged browser helpers no longer create a visible console window.
+
 ## [4.2.1] - 2026-07-22
 
 ### Fixed

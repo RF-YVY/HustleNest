@@ -58,6 +58,20 @@ class BrowserAppLauncherTests(unittest.TestCase):
         finally:
             lifecycle.stop()
 
+    def test_browser_client_lifecycle_stops_when_no_tab_connects(self) -> None:
+        shutdown = threading.Event()
+        lifecycle = browser_app.web_bridge.BrowserClientLifecycle(
+            shutdown.set,
+            enabled=True,
+            startup_grace_seconds=0.03,
+            poll_seconds=0.01,
+        )
+        lifecycle.start()
+        try:
+            self.assertTrue(shutdown.wait(0.5))
+        finally:
+            lifecycle.stop()
+
     def test_bundled_runtime_is_preferred_when_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"
@@ -76,6 +90,22 @@ class BrowserAppLauncherTests(unittest.TestCase):
         process.returncode = 2
         with self.assertRaisesRegex(RuntimeError, "exit code 2"):
             browser_app._wait_for_frontend(process, "127.0.0.1", 3000, timeout=0.1)
+
+    def test_wait_for_frontend_rejects_a_different_local_application(self) -> None:
+        process = MagicMock()
+        process.poll.return_value = None
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b"<title>WiFi DensePose</title>"
+        with (
+            patch("hustlenest.browser_app.urllib.request.urlopen", return_value=response),
+            self.assertRaisesRegex(RuntimeError, "not HustleNest"),
+        ):
+            browser_app._wait_for_frontend(process, "127.0.0.1", 3000, timeout=0.1)
+
+    def test_automatic_frontend_port_uses_an_available_port(self) -> None:
+        port = browser_app._available_frontend_port("127.0.0.1")
+        self.assertGreater(port, 0)
+        self.assertLessEqual(port, 65535)
 
     def test_run_starts_built_frontend_then_backend_and_cleans_up(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -107,8 +137,9 @@ class BrowserAppLauncherTests(unittest.TestCase):
                 8877,
                 "http://localhost:3010",
                 shutdown_on_client_disconnect=True,
+                allowed_browser_origin="http://localhost:3010",
             )
-            stop.assert_called_once_with(process, 3010)
+            stop.assert_called_once_with(process)
 
     def test_run_requires_a_production_browser_build(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

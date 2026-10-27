@@ -11,6 +11,8 @@ import {
   CreditCard,
   FileText,
   ExternalLink,
+  Eye,
+  EyeOff,
   Globe2,
   Hash,
   LockKeyhole,
@@ -79,6 +81,7 @@ export function SettingsWorkspace({ initialSettings, onSettingsUpdated, onNaviga
   const [draft, setDraft] = useState(() => draftFrom(initialSettings));
   const [saving, setSaving] = useState<EditableSection | null>(null);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [revealedPayments, setRevealedPayments] = useState<{ methods: Record<string, string>; other: string } | null>(null);
   const [settingQuery, setSettingQuery] = useState("");
   const [activeSetting, setActiveSetting] = useState<string>(settingJumps[0][0]);
   const [panesCollapsed, setPanesCollapsed] = useState(false);
@@ -135,7 +138,7 @@ export function SettingsWorkspace({ initialSettings, onSettingsUpdated, onNaviga
       if (draft.invoice.contact_email && !/^\S+@\S+\.\S+$/.test(draft.invoice.contact_email)) return "Enter a valid invoice contact email.";
     }
     if (section === "tax" && (Number(draft.tax.rate_percent) < 0 || Number(draft.tax.rate_percent) > 100)) return "Sales tax must be between 0% and 100%.";
-    if (section === "payments" && draft.payments.methods.some((method) => !method.label.trim() || (method.source_index === null && !method.replacement.trim()))) return "Every payment method needs a label and new methods need a destination.";
+    if (section === "payments" && draft.payments.methods.some((method) => !method.label.trim())) return "Every payment method needs a label.";
     if (section === "browser" && draft.browser.launch_mode === "specific" && draft.browser.browser_id === "system") return "Choose an installed work browser.";
     return null;
   };
@@ -152,12 +155,33 @@ export function SettingsWorkspace({ initialSettings, onSettingsUpdated, onNaviga
       if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message || "Settings could not be saved.");
       onSettingsUpdated?.(payload.data);
       setDraft(draftFrom(payload.data));
+      if (section === "payments") setRevealedPayments(null);
       setNotice({ tone: "success", text: `${section[0].toUpperCase()}${section.slice(1)} settings saved.` });
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Settings could not be saved." });
     } finally { setSaving(null); }
   };
-  const saveButton = (section: EditableSection) => <button className={`secondary-button setting-save${dirtySections.has(section) ? " has-changes" : ""}`} onClick={() => void saveSection(section)} disabled={!settings || saving !== null || !dirtySections.has(section)}><Save size={14} />{saving === section ? "Saving…" : dirtySections.has(section) ? "Save changes" : "Saved"}</button>;
+  const saveButton = (section: EditableSection) => {
+    const canSave = dirtySections.has(section) || section === "payments";
+    return <button className={`secondary-button setting-save${dirtySections.has(section) ? " has-changes" : ""}`} onClick={() => void saveSection(section)} disabled={!settings || saving !== null || !canSave}><Save size={14} />{saving === section ? "Saving…" : section === "payments" ? "Save payment methods" : dirtySections.has(section) ? "Save changes" : "Saved"}</button>;
+  };
+  const togglePaymentValues = async () => {
+    if (revealedPayments) { setRevealedPayments(null); return; }
+    if (!settings) return;
+    setNotice(null);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/settings/payments/reveal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_revision: settings.summary.revision }),
+      });
+      const payload = await response.json() as { ok: boolean; data?: { methods: Array<{ source_index: number; value: string }>; other: string }; error?: { message: string } };
+      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message || "Saved payment values could not be shown.");
+      setRevealedPayments({ methods: Object.fromEntries(payload.data.methods.map((item) => [String(item.source_index), item.value])), other: payload.data.other });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Saved payment values could not be shown." });
+    }
+  };
   const refreshSettings = async () => {
     const response = await fetch(`${bridgeUrl}/api/settings`);
     const payload = await response.json() as { ok: boolean; data?: SettingsWorkspaceData };
@@ -229,13 +253,13 @@ export function SettingsWorkspace({ initialSettings, onSettingsUpdated, onNaviga
 
         <article className="settings-card payment-settings-card" id="settings-payments">
           <div className="settings-card-heading"><span className="setting-icon amber"><CreditCard size={19} /></span><div><h2>Invoice payment methods</h2><p>Destinations shown to customers</p></div>{saveButton("payments")}</div>
-          <div className="payment-security-note"><ShieldCheck size={16} /><span><strong>Saved destinations stay masked.</strong> Leave replacement blank to keep the current value.</span></div>
+          <div className="payment-security-note"><ShieldCheck size={16} /><span><strong>Payment destinations are optional.</strong> Saved destinations stay masked by default; leave replacement blank to keep the current value.</span><button type="button" className="secondary-button" onClick={() => void togglePaymentValues()} disabled={!settings}>{revealedPayments ? <EyeOff size={14} /> : <Eye size={14} />}{revealedPayments ? "Hide saved values" : "Show saved values"}</button></div>
           <div className="payment-method-editor">
-            {draft.payments.methods.map((method, index) => <div className="payment-method-row" key={`${method.source_index ?? "new"}-${index}`}><label><span>Method label</span><input value={method.label} placeholder="ACH, PayPal, check…" onChange={(event) => setDraft((value) => ({ ...value, payments: { ...value.payments, methods: value.payments.methods.map((item, row) => row === index ? { ...item, label: event.target.value } : item) } }))} /></label><label><span>{method.source_index === null ? "Payment destination" : "Replace saved destination"}</span><input type="password" value={method.replacement} placeholder={method.source_index === null ? "Account, email, or payment link" : "Leave blank to keep saved value"} onChange={(event) => setDraft((value) => ({ ...value, payments: { ...value.payments, methods: value.payments.methods.map((item, row) => row === index ? { ...item, replacement: event.target.value } : item) } }))} /></label><button className="icon-button payment-remove" aria-label={`Remove ${method.label || "payment method"}`} onClick={() => setDraft((value) => ({ ...value, payments: { ...value.payments, methods: value.payments.methods.filter((_item, row) => row !== index) } }))}><Trash2 size={16} /></button></div>)}
+            {draft.payments.methods.map((method, index) => { const revealedValue = method.source_index === null ? "" : revealedPayments?.methods[String(method.source_index)] ?? ""; return <div className="payment-method-row" key={`${method.source_index ?? "new"}-${index}`}><label><span>Method label</span><input value={method.label} placeholder="ACH, PayPal, check…" onChange={(event) => setDraft((value) => ({ ...value, payments: { ...value.payments, methods: value.payments.methods.map((item, row) => row === index ? { ...item, label: event.target.value } : item) } }))} /></label><label><span>{method.source_index === null ? "Payment destination (optional)" : "Replace saved destination (optional)"}</span><input type={revealedPayments ? "text" : "password"} value={method.replacement || revealedValue} placeholder={method.source_index === null ? "Account, email, or payment link (optional)" : "Leave blank to keep saved value"} onChange={(event) => setDraft((value) => ({ ...value, payments: { ...value.payments, methods: value.payments.methods.map((item, row) => row === index ? { ...item, replacement: event.target.value } : item) } }))} /></label><button type="button" className="icon-button payment-remove" aria-label={`Remove ${method.label || "payment method"}`} onClick={() => setDraft((value) => ({ ...value, payments: { ...value.payments, methods: value.payments.methods.filter((_item, row) => row !== index) } }))}><Trash2 size={16} /></button></div>; })}
             {!draft.payments.methods.length ? <p className="payment-empty">No payment methods configured. Invoices will use the business name for check payments.</p> : null}
-            <button className="secondary-button payment-add" onClick={() => setDraft((value) => ({ ...value, payments: { ...value.payments, methods: [...value.payments.methods, { source_index: null, label: "", replacement: "" }] } }))} disabled={draft.payments.methods.length >= 12}><Plus size={15} /> Add payment method</button>
+            <button type="button" className="secondary-button payment-add" onClick={() => setDraft((value) => ({ ...value, payments: { ...value.payments, methods: [...value.payments.methods, { source_index: null, label: "", replacement: "" }] } }))} disabled={draft.payments.methods.length >= 12}><Plus size={15} /> Add payment method</button>
           </div>
-          <div className="payment-notes-editor"><div><strong>Additional payment notes</strong><span>{settings?.payments.other_configured ? "Saved notes are configured but remain masked." : "No additional notes are configured."}</span></div><div className="payment-note-actions"><label><input type="radio" name="payment-notes" checked={draft.payments.other_action === "keep"} onChange={() => setDraft((value) => ({ ...value, payments: { ...value.payments, other_action: "keep", other_replacement: "" } }))} /> Keep saved notes</label><label><input type="radio" name="payment-notes" checked={draft.payments.other_action === "replace"} onChange={() => setDraft((value) => ({ ...value, payments: { ...value.payments, other_action: "replace" } }))} /> Replace notes</label><label><input type="radio" name="payment-notes" checked={draft.payments.other_action === "remove"} onChange={() => setDraft((value) => ({ ...value, payments: { ...value.payments, other_action: "remove", other_replacement: "" } }))} /> Remove notes</label></div>{draft.payments.other_action === "replace" ? <textarea value={draft.payments.other_replacement} placeholder="Payment instructions shown on invoices" onChange={(event) => setDraft((value) => ({ ...value, payments: { ...value.payments, other_replacement: event.target.value } }))} /> : null}</div>
+          <div className="payment-notes-editor"><div><strong>Additional payment notes</strong><span>{settings?.payments.other_configured ? revealedPayments ? "Saved notes are shown below." : "Saved notes are configured but remain masked." : "No additional notes are configured."}</span></div><div className="payment-note-actions"><label><input type="radio" name="payment-notes" checked={draft.payments.other_action === "keep"} onChange={() => setDraft((value) => ({ ...value, payments: { ...value.payments, other_action: "keep", other_replacement: "" } }))} /> Keep saved notes</label><label><input type="radio" name="payment-notes" checked={draft.payments.other_action === "replace"} onChange={() => setDraft((value) => ({ ...value, payments: { ...value.payments, other_action: "replace" } }))} /> Replace notes</label><label><input type="radio" name="payment-notes" checked={draft.payments.other_action === "remove"} onChange={() => setDraft((value) => ({ ...value, payments: { ...value.payments, other_action: "remove", other_replacement: "" } }))} /> Remove notes</label></div>{draft.payments.other_action === "replace" ? <textarea value={draft.payments.other_replacement} placeholder="Payment instructions shown on invoices" onChange={(event) => setDraft((value) => ({ ...value, payments: { ...value.payments, other_replacement: event.target.value } }))} /> : revealedPayments?.other ? <textarea readOnly value={revealedPayments.other} aria-label="Saved additional payment notes" /> : null}</div>
         </article>
 
         <article className="settings-card browser-settings-card" id="settings-browser">

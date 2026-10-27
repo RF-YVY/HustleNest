@@ -16,6 +16,9 @@ import type { ReportsWorkspaceData } from "../lib/hustlenest";
 const money = (value: string | number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
 const periods = [
   ["this_month", "This month"],
+  ["last_month", "Last month"],
+  ["last_year", "Last year"],
+  ["last_30_days", "Last 30 days"],
   ["this_quarter", "This quarter"],
   ["last_quarter", "Last quarter"],
   ["this_year", "This year"],
@@ -24,9 +27,10 @@ const periods = [
   ["custom_range", "Custom range"],
 ];
 const reportExports = [
+  ["cpa_zip", "CPA package (ZIP)"],
   ["orders_csv", "Order detail CSV"],
   ["sales_pdf", "Sales report PDF"],
-  ["inventory_pdf", "Inventory report PDF"],
+  ["inventory_pdf", "Inventory PDF (current snapshot)"],
   ["pnl_pdf", "Profit & loss PDF"],
   ["customer_pdf", "Customer report PDF"],
   ["comparison_pdf", "Period comparison PDF"],
@@ -62,10 +66,10 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
     try { setReports(await getBridgeData<ReportsWorkspaceData>(`/api/reports?${reportQuery("custom_range")}`)); }
     finally { setLoading(false); }
   };
-  const exportQuery = new URLSearchParams({ kind: exportKind, period });
-  if (period === "custom_range") {
-    exportQuery.set("start", customStart);
-    exportQuery.set("end", customEnd);
+  const exportQuery = new URLSearchParams({ kind: exportKind, period: reports?.period.key ?? period });
+  if (reports?.period.key === "custom_range") {
+    exportQuery.set("start", reports.period.start ?? "");
+    exportQuery.set("end", reports.period.end);
   }
   const maxTrend = Math.max(...(reports?.trend.map((item) => Number(item.revenue)) ?? [0]), 1);
   const totalFulfillment = reports?.fulfillment.reduce((sum, item) => sum + item.count, 0) ?? 0;
@@ -74,8 +78,9 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
     <div className="workspace reports-page">
       <div className="page-heading reports-heading">
         <div><div className="eyebrow"><span>Understand</span><ChevronRight size={14} /><span>Reports</span></div><h1>Reports</h1><p>Turn sales, costs, and fulfillment activity into the next useful decision.</p></div>
-        <div className="report-heading-actions"><label className="report-period"><span>Reporting period</span><select aria-label="Reporting period" value={period} onChange={(event) => void selectPeriod(event.target.value)} disabled={loading}>{periods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{period === "custom_range" ? <><label className="report-date"><span>From</span><input aria-label="Report start date" type="date" value={customStart} max={customEnd || undefined} onChange={(event) => setCustomStart(event.target.value)} /></label><label className="report-date"><span>To</span><input aria-label="Report end date" type="date" value={customEnd} min={customStart || undefined} onChange={(event) => setCustomEnd(event.target.value)} /></label><button className="secondary-button report-apply" onClick={() => void applyCustomRange()} disabled={loading || !customStart || !customEnd || customEnd < customStart}>Apply</button></> : null}<label className="report-period"><span>Export</span><select aria-label="Report export type" value={exportKind} onChange={(event) => setExportKind(event.target.value)}>{reportExports.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><a className="secondary-button report-download" href={`${bridgeUrl}/api/reports/export?${exportQuery.toString()}`}><Download size={15} /> Download</a></div>
+        <div className="report-heading-actions"><label className="report-period"><span>Reporting period</span><select aria-label="Reporting period" value={period} onChange={(event) => void selectPeriod(event.target.value)} disabled={loading}>{periods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{period === "custom_range" ? <><label className="report-date"><span>From</span><input aria-label="Report start date" type="date" value={customStart} max={customEnd || undefined} onChange={(event) => setCustomStart(event.target.value)} /></label><label className="report-date"><span>To</span><input aria-label="Report end date" type="date" value={customEnd} min={customStart || undefined} onChange={(event) => setCustomEnd(event.target.value)} /></label><button className="secondary-button report-apply" onClick={() => void applyCustomRange()} disabled={loading || !customStart || !customEnd || customEnd < customStart}>Apply</button></> : null}<label className="report-period"><span>Export</span><select aria-label="Report export type" value={exportKind} onChange={(event) => setExportKind(event.target.value)}>{reportExports.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><a className="secondary-button report-download" aria-disabled={loading} onClick={(event) => { if (loading) event.preventDefault(); }} href={`${bridgeUrl}/api/reports/export?${exportQuery.toString()}`}><Download size={15} /> Download</a></div>
       </div>
+      <p className="quiet-empty">Applied dates: {reports?.period.start ?? "All history"} through {reports?.period.end ?? "today"} (inclusive). Downloads use these applied dates. Inventory is a current snapshot; comparisons use the preceding period of the same length.</p>
       <section className={loading ? "metric-grid reports-metrics loading" : "metric-grid reports-metrics"} aria-label="Report summary">
         <article className="metric-card accent-card"><div className="metric-icon"><CircleDollarSign size={20} /></div><div><span>Revenue</span><strong>{money(reports?.metrics.revenue ?? 0)}</strong><small><ArrowUpRight size={13} /> {reports?.metrics.revenue_change ?? 0}% vs prior period</small></div></article>
         <article className="metric-card"><div className="metric-icon violet"><TrendingUp size={20} /></div><div><span>Gross profit</span><strong>{money(reports?.metrics.gross_profit ?? 0)}</strong><small>{reports?.metrics.gross_margin ?? 0}% margin</small></div></article>
@@ -83,6 +88,13 @@ export function ReportsWorkspace({ initialReports, onOpenOrder }: { initialRepor
         <article className="metric-card"><div className="metric-icon rose"><BarChart3 size={20} /></div><div><span>Net after overhead</span><strong>{money(reports?.metrics.net_after_overhead ?? 0)}</strong><small>{reports?.metrics.order_count ?? 0} orders · {money(reports?.metrics.average_order ?? 0)} average</small></div></article>
       </section>
 
+      <article className="report-card">
+        <div className="report-card-heading"><h2>Completed $0 items / replacement losses</h2><strong>{money(reports?.metrics.zero_sale_cost ?? 0)}</strong></div>
+        <p>Cost of goods: {money(reports?.metrics.cost_of_goods ?? 0)}. Replacement costs below are already included in gross profit and are not deducted again.</p>
+        {reports?.zero_sale_items?.map((item, index) => <p key={`${item.order_id}-${index}`}><button className="secondary-button" onClick={() => onOpenOrder(item.order_id)}>{item.number} · {item.customer} · {item.product} × {item.quantity} · $0.00 revenue · {money(item.cost)} cost · {money(item.profit)} loss</button></p>)}
+        {!reports?.zero_sale_items?.length ? <p>No completed $0 items in this period.</p> : null}
+        <p>Record replacement items at $0 with actual costs and a remake note; mark Shipped when fulfilled. Download the CPA package for summary and supporting order, expense, and loss details.</p>
+      </article>
       <section className="reports-grid">
         <article className="report-card revenue-trend">
           <div className="report-card-heading"><div><span>Performance</span><h2>Revenue and gross profit</h2></div><strong>{reports?.period.label ?? "This year"}</strong></div>

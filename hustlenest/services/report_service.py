@@ -18,6 +18,33 @@ from ..models.order_models import (
 )
 
 
+def zero_sale_details(start_date=None, end_date=None):
+    details = []
+    for row in order_repository.fetch_order_report(start_date, end_date):
+        if row.status.casefold() not in {"shipped", "completed", "delivered"}:
+            continue
+        order = order_repository.fetch_order(row.order_id)
+        if not order:
+            continue
+        for item in order.items:
+            if item.unit_price == 0 and item.quantity > 0:
+                details.append(dict(order_id=row.order_id, number=row.order_number,
+                    customer=row.customer_name, date=row.order_date.isoformat(),
+                    product=item.product_name, quantity=item.quantity, revenue=0,
+                    cost=item.line_cost, profit=-item.line_cost,
+                    notes=item.price_adjustment_note or order.notes))
+    return details
+
+
+def _zero_sale_html(start, end):
+    from html import escape
+    rows = zero_sale_details(start, end)
+    html = "<h2>Completed $0 items / replacement losses</h2><p>Costs below are already included in cost of goods sold; do not deduct again. Uses order date; Shipped means fulfilled.</p><table><tr><th>Order / Customer</th><th>Product</th><th>Qty</th><th>Revenue</th><th>Cost</th><th>Profit / Loss</th><th>Notes</th></tr>"
+    for r in rows:
+        html += f"<tr><td>{escape(r['number'])} / {escape(r['customer'])}</td><td>{escape(r['product'])}</td><td>{r['quantity']}</td><td>$0.00</td><td>{_format_currency(r['cost'])}</td><td>{_format_currency(r['profit'])}</td><td>{escape(r['notes'])}</td></tr>"
+    return html + "</table>"
+
+
 def _format_currency(amount: float) -> str:
     """Format a number as currency."""
     return f"${amount:,.2f}"
@@ -346,6 +373,7 @@ def generate_sales_report_html(
 </html>
 """
     
+    html = html.replace("</body>", _zero_sale_html(start_date, end_date) + "</body>")
     return html
 
 
@@ -573,8 +601,9 @@ def generate_pnl_report_html(
         HTML string
     """
     # Get financial data
-    revenue = finance_service.calculate_sales_total(start_date, end_date)
-    cogs = finance_service.calculate_cogs_total(start_date, end_date)
+    report_rows = order_repository.fetch_order_report(start_date, end_date)
+    revenue = sum(row.total_amount for row in report_rows)
+    cogs = sum(row.total_cost for row in report_rows)
     gross_profit = revenue - cogs
     
     # Get paid/unpaid breakdown
@@ -765,6 +794,7 @@ def generate_pnl_report_html(
 </html>
 """
     
+    html = html.replace("</body>", _zero_sale_html(start_date, end_date) + "</body>")
     return html
 
 

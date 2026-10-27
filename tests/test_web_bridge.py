@@ -46,6 +46,58 @@ from hustlenest.services import order_service, report_service, soft_delete_servi
 
 
 class OrdersBridgeTests(unittest.TestCase):
+    def test_report_date_presets_and_inclusive_custom_scope(self):
+        from hustlenest.web_bridge import _report_period, reports_workspace, report_download
+        today = date.today()
+        for key in ["last_month", "last_year", "last_30_days"]:
+            start, end, label = _report_period(key)
+            self.assertLessEqual(start, end)
+            self.assertEqual(reports_workspace(key)["period"]["key"], key)
+        self.assertEqual((_report_period("last_30_days")[1] - _report_period("last_30_days")[0]).days, 29)
+        report = reports_workspace("custom_range", today, today)
+        self.assertEqual(report["metrics"]["order_count"], 1)
+        report = reports_workspace("custom_range", today - timedelta(days=2), today - timedelta(days=1))
+        self.assertEqual(report["metrics"]["order_count"], 0)
+        import zipfile
+        download = report_download({"kind": ["cpa_zip"], "period": ["custom_range"],
+            "start": [(today - timedelta(days=2)).isoformat()], "end": [(today - timedelta(days=1)).isoformat()]})
+        with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+            self.assertNotIn("HN-TEST-001", archive.read("orders.csv").decode("utf-8-sig"))
+        with self.assertRaises(BridgeError):
+            _report_period("custom_range", today, today - timedelta(days=1))
+
+    def test_completed_zero_price_lines_and_cpa_package(self):
+        import zipfile
+        from hustlenest.web_bridge import reports_workspace, report_download
+        order_repository.insert_order(Order(
+            order_number="REMAKE", customer_name="Cap customer", customer_address="",
+            order_date=date.today(), status="Shipped", notes="Correct hat model",
+            items=[OrderItem(product_name="Replacement cap", product_description="", product_sku="CAP",
+                             quantity=12, unit_price=0, base_unit_cost=5,
+                             cost_components=[CostComponent("Embroidery", 2)]),
+                   OrderItem(product_name="Paid item", product_description="", product_sku="PAID",
+                             quantity=1, unit_price=10, base_unit_cost=2)]))
+        report = reports_workspace("this_year")
+        self.assertEqual(report["metrics"]["zero_sale_cost"], "84.00")
+        self.assertEqual(report["zero_sale_items"][0]["profit"], -84)
+        self.assertEqual(float(report["metrics"]["net_after_overhead"]),
+                         float(report["metrics"]["gross_profit"]))
+        for status in ["Received", "Cancelled", "Quote", "Draft"]:
+            order_repository.insert_order(Order(
+                order_number="EXCLUDE-" + status, customer_name="Not fulfilled", customer_address="",
+                order_date=date.today(), status=status,
+                items=[OrderItem(product_name="Not a completed loss", product_description="", product_sku="N",
+                                 quantity=1, unit_price=0, base_unit_cost=100)]))
+        self.assertEqual(len(report_service.zero_sale_details(date.today(), date.today())), 1)
+        download = report_download({"kind": ["cpa_zip"], "period": ["this_year"]})
+        with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+            self.assertIn("zero_sale_items.csv", archive.namelist())
+            self.assertIn("84.0", archive.read("zero_sale_items.csv").decode("utf-8-sig"))
+            self.assertIn("expenses.csv", archive.namelist())
+        html = report_service.generate_pnl_report_html(date.today(), date.today(), settings_repository.get_app_settings())
+        self.assertIn("Replacement cap", html)
+        self.assertIn("$84.00", html)
+
     def setUp(self) -> None:
         self.storage = tempfile.TemporaryDirectory()
         self.environment = patch.dict(os.environ, {"LOCALAPPDATA": self.storage.name})
@@ -205,6 +257,49 @@ class OrdersBridgeTests(unittest.TestCase):
             )
         self.assertEqual(stale_cancel.exception.code, "status_conflict")
 
+    def test_invoice_html_shows_partial_payment_balance_and_managed_logo(self) -> None:
+        branding = Path(self.storage.name) / "HustleNest" / "media" / "branding"
+        branding.mkdir(parents=True)
+        logo = branding / "invoice-logo.png"
+        logo.write_bytes(b"\x89PNG\r\n\x1a\ninvoice-logo")
+        settings_repository.set_setting("dashboard_logo_path", "media/branding/invoice-logo.png")
+        order = order_repository.fetch_order(self.order_id)
+        assert order is not None
+
+        invoice_html = order_service._render_invoice_html(
+            order,
+            settings_repository.get_app_settings(),
+            amount_paid=10.0,
+        )
+
+        self.assertIn("Payment Applied", invoice_html)
+        self.assertIn("-$10.00", invoice_html)
+        self.assertIn("Remaining Balance: $15.00", invoice_html)
+        self.assertNotIn(">Paid in Full<", invoice_html)
+        self.assertIn('<table class="invoice-header"', invoice_html)
+        self.assertIn('<table class="address-section"', invoice_html)
+        self.assertIn("data:image/png;base64,", invoice_html)
+
+    def test_order_status_can_move_back_and_reopen_a_shipped_order(self) -> None:
+        order_repository.update_order_status(self.order_id, "Shipped", ship_date=date.today())
+
+        status, reopened = self.application.dispatch(
+            "POST",
+            f"/api/orders/{self.order_id}/move-back",
+            {"expected_status": "Shipped"},
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(reopened["status"], "Ready to Ship")
+        self.assertIsNone(reopened["ship_date"])
+        self.assertEqual(reopened["activity"][0]["event_type"], "Status moved back")
+        with self.assertRaisesRegex(BridgeError, "another window"):
+            self.application.dispatch(
+                "POST",
+                f"/api/orders/{self.order_id}/move-back",
+                {"expected_status": "Shipped"},
+            )
+
     def test_lookup_create_and_update_order_workflow(self) -> None:
         _, customers = self.application.dispatch("GET", "/api/customers?query=customer")
         _, products = self.application.dispatch("GET", "/api/products?query=test")
@@ -214,6 +309,7 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertEqual(options["next_order_number"], "ORD-0001")
 
         draft = {
+            "record_type": "order",
             "customer": {
                 "name": "Browser Customer",
                 "address": "200 Main Street, Springfield, MO 65806",
@@ -222,6 +318,7 @@ class OrdersBridgeTests(unittest.TestCase):
             "target_completion_date": (date.today() + timedelta(days=5)).isoformat(),
             "status": "Received",
             "payment_status": "unpaid",
+            "quote_expires": None,
             "items": [
                 {"product_id": self.product.id, "quantity": 2, "unit_price": "15.00"}
             ],
@@ -1097,6 +1194,15 @@ class OrdersBridgeTests(unittest.TestCase):
         self.assertNotIn("secret-routing", str(initial))
         self.assertNotIn("private box", str(initial))
 
+        reveal_status, revealed = self.application.dispatch(
+            "POST",
+            "/api/settings/payments/reveal",
+            {"expected_revision": initial["summary"]["revision"]},
+        )
+        self.assertEqual(reveal_status, HTTPStatus.OK)
+        self.assertEqual(revealed["methods"], [{"source_index": 0, "value": "secret-routing"}])
+        self.assertEqual(revealed["other"], "Mail checks to private box")
+
         status, updated = self.application.dispatch(
             "PUT",
             "/api/settings",
@@ -1128,6 +1234,38 @@ class OrdersBridgeTests(unittest.TestCase):
         with self.assertRaises(BridgeError) as conflict:
             self.application.dispatch("PUT", "/api/settings", {"section": "payments", "expected_revision": revision, "values": {"methods": []}})
         self.assertEqual(conflict.exception.code, "settings_conflict")
+
+    def test_browser_saves_label_only_payment_method(self) -> None:
+        _, initial = self.application.dispatch("GET", "/api/settings")
+        status, updated = self.application.dispatch(
+            "PUT",
+            "/api/settings",
+            {
+                "section": "payments",
+                "expected_revision": initial["summary"]["revision"],
+                "values": {
+                    "methods": [
+                        {"source_index": None, "label": "Cash / PayPal / Venmo / Cash App / Zelle", "replacement": ""},
+                    ],
+                    "other_action": "keep",
+                    "other_replacement": "",
+                },
+            },
+        )
+        self.assertEqual(status, HTTPStatus.OK)
+        saved = settings_repository.get_app_settings()
+        self.assertEqual(
+            [(item.label, item.value) for item in saved.payment_options],
+            [("Cash / PayPal / Venmo / Cash App / Zelle", "")],
+        )
+        self.assertEqual(
+            updated["payments"]["methods"],
+            [{"source_index": 0, "label": "Cash / PayPal / Venmo / Cash App / Zelle", "configured": False}],
+        )
+        order = order_repository.fetch_order(self.order_id)
+        assert order is not None
+        invoice_html = order_service._render_invoice_html(order, saved)
+        self.assertIn("Cash / PayPal / Venmo / Cash App / Zelle", invoice_html)
 
     def test_browser_updates_masked_cloud_provider_fields(self) -> None:
         _, initial = self.application.dispatch("GET", "/api/sync-settings")

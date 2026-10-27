@@ -9,10 +9,14 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
 from hustlenest import web_bridge
+
+
+FRONTEND_IDENTITY_MARKER = b"HustleNest \xc2\xb7 Business workspace"
 
 
 def _raise_keyboard_interrupt(_signum: int, _frame: object) -> None:
@@ -40,43 +44,34 @@ def _wait_for_frontend(process: subprocess.Popen, host: str, port: int, timeout:
         if process.poll() is not None:
             raise RuntimeError(f"The browser UI stopped during startup (exit code {process.returncode}).")
         try:
-            with socket.create_connection((host, port), timeout=0.4):
+            with urllib.request.urlopen(f"http://{host}:{port}/", timeout=0.8) as response:
+                page = response.read(512_000)
+            if FRONTEND_IDENTITY_MARKER in page:
                 return
-        except OSError:
+            raise RuntimeError(
+                f"Port {port} returned a page that is not HustleNest. "
+                "Another local application may be using that address."
+            )
+        except RuntimeError:
+            raise
+        except (OSError, TimeoutError):
             time.sleep(0.15)
     raise RuntimeError(f"The browser UI did not become ready at http://{host}:{port}.")
 
 
-def _windows_listener_pids(port: int) -> set[int]:
-    result = subprocess.run(
-        ["netstat", "-ano", "-p", "tcp"],
-        check=False,
-        capture_output=True,
-        text=True,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    pids: set[int] = set()
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if len(parts) < 5 or parts[0].upper() != "TCP" or parts[3].upper() != "LISTENING":
-            continue
-        if parts[1].rsplit(":", 1)[-1] != str(port):
-            continue
-        try:
-            pids.add(int(parts[-1]))
-        except ValueError:
-            continue
-    return pids
+def _available_frontend_port(host: str) -> int:
+    """Ask Windows for an unused loopback port for this launch."""
+    bind_host = "127.0.0.1" if host in {"0.0.0.0", "localhost"} else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+        candidate.bind((bind_host, 0))
+        return int(candidate.getsockname()[1])
 
 
-def _stop_frontend(process: subprocess.Popen, port: int) -> None:
+def _stop_frontend(process: subprocess.Popen) -> None:
     if os.name == "nt":
-        pids = _windows_listener_pids(port)
         if process.poll() is None:
-            pids.add(process.pid)
-        for pid in pids:
             subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -95,7 +90,7 @@ def run(
     *,
     web_directory: Path,
     frontend_host: str = "127.0.0.1",
-    frontend_port: int = 3000,
+    frontend_port: int = 0,
     backend_host: str = web_bridge.DEFAULT_HOST,
     backend_port: int = web_bridge.DEFAULT_PORT,
     launch_browser: bool = True,
@@ -111,8 +106,14 @@ def run(
     if not node or not local_server.is_file() or not vinext_server.is_file():
         raise RuntimeError("Node.js and the installed browser dependencies are required. Run `npm install` in the web directory.")
 
+    if frontend_port == 0:
+        frontend_port = _available_frontend_port(frontend_host)
     command = [node, str(local_server), "-H", frontend_host, "-p", str(frontend_port)]
-    creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    creation_flags = (
+        subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        if os.name == "nt"
+        else 0
+    )
     frontend = subprocess.Popen(command, cwd=web_directory, creationflags=creation_flags)
     try:
         _wait_for_frontend(frontend, frontend_host, frontend_port)
@@ -122,16 +123,17 @@ def run(
             backend_port,
             f"http://{browser_host}:{frontend_port}" if launch_browser else None,
             shutdown_on_client_disconnect=True,
+            allowed_browser_origin=f"http://{browser_host}:{frontend_port}",
         )
     finally:
-        _stop_frontend(frontend, frontend_port)
+        _stop_frontend(frontend)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Start the local HustleNest backend and browser UI together.")
     parser.add_argument("--web-dir", type=Path, default=_default_web_directory())
     parser.add_argument("--frontend-host", default="127.0.0.1")
-    parser.add_argument("--frontend-port", default=3000, type=int)
+    parser.add_argument("--frontend-port", default=0, type=int, help="Browser UI port; 0 chooses a free port automatically.")
     parser.add_argument("--backend-host", default=web_bridge.DEFAULT_HOST)
     parser.add_argument("--backend-port", default=web_bridge.DEFAULT_PORT, type=int)
     parser.add_argument("--no-browser", action="store_true", help="Do not open a browser for this launch.")

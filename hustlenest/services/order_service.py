@@ -590,7 +590,7 @@ def update_app_settings(settings: AppSettings) -> AppSettings:
     for option in settings.payment_options:
         label = option.label.strip()
         value = option.value.strip()
-        if label and value:
+        if label:
             payment_payload.append({"label": label, "value": value})
     settings_repository.set_setting("payment_options", json.dumps(payment_payload, ensure_ascii=False))
 
@@ -1051,7 +1051,13 @@ def _render_tax_summary_html(
     """
 
 
-def export_order_invoice(order_id: int, destination: str, *, document_title: Optional[str] = None) -> Path:
+def export_order_invoice(
+    order_id: int,
+    destination: str,
+    *,
+    document_title: Optional[str] = None,
+    amount_paid: Optional[float] = None,
+) -> Path:
     order = order_repository.fetch_order(int(order_id))
     if order is None:
         raise ValueError("Order not found.")
@@ -1063,12 +1069,26 @@ def export_order_invoice(order_id: int, destination: str, *, document_title: Opt
     if not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
 
-    html_content = _render_invoice_html(order, settings, document_title=document_title)
+    resolved_amount_paid = order.display_total if order.is_paid else 0.0
+    if amount_paid is not None:
+        resolved_amount_paid = min(order.display_total, max(0.0, float(amount_paid)))
+    html_content = _render_invoice_html(
+        order,
+        settings,
+        document_title=document_title,
+        amount_paid=resolved_amount_paid,
+    )
     _write_pdf_from_html(html_content, path)
     return path
 
 
-def _render_invoice_html(order: Order, settings: AppSettings, *, document_title: Optional[str] = None) -> str:
+def _render_invoice_html(
+    order: Order,
+    settings: AppSettings,
+    *,
+    document_title: Optional[str] = None,
+    amount_paid: float = 0.0,
+) -> str:
     business_name = (settings.business_name or "").strip() or "Company Name"
     slogan = (settings.invoice_slogan or "Your Company Slogan").strip() or "Your Company Slogan"
     street = (settings.invoice_street or "Street Address").strip() or "Street Address"
@@ -1142,8 +1162,8 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
     if logo_payload is not None:
         mime_type, encoded = logo_payload
         logo_markup = (
-            f"<div class=\"logo-wrap\"><img src=\"data:{mime_type};base64,{encoded}\" "
-            f"alt=\"{html.escape(business_name)} logo\" class=\"logo\" width=\"{invoice_logo_size}\" height=\"{invoice_logo_size}\"/></div>"
+            f"<img src=\"data:{mime_type};base64,{encoded}\" "
+            f"alt=\"{html.escape(business_name)} logo\" class=\"logo\" width=\"{invoice_logo_size}\" height=\"{invoice_logo_size}\"/>"
         )
 
     line_rows: List[str] = []
@@ -1157,7 +1177,7 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
         description_parts = [base_label]
         if item.product_description and item.product_description.strip():
             description_parts.append(item.product_description.strip())
-        description = " – ".join(description_parts)
+        description = " - ".join(description_parts)
         adjustments: List[str] = []
         if float(getattr(item, "applied_discount", 0.0) or 0.0) > 0.005:
             adjustments.append(
@@ -1220,6 +1240,8 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
     show_tax_line = bool(settings.tax_show_on_invoice and tax_amount > 0)
     shipping_amount = 0.0
     total_due = subtotal + (tax_amount if include_tax_in_total else 0.0) + shipping_amount
+    applied_payment = min(total_due, max(0.0, float(amount_paid or 0.0)))
+    balance_due = max(0.0, total_due - applied_payment)
 
     totals_rows = [
         """
@@ -1253,22 +1275,53 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
         """.format(shipping=_format_currency(shipping_amount))
     )
 
-    total_label = "Total Due"
+    total_label = "Invoice Total"
     if show_tax_line and not include_tax_in_total:
-        total_label = "Total Due (excludes tax)"
+        total_label = "Invoice Total (excludes tax)"
     elif include_tax_in_total and tax_amount > 0 and not show_tax_line:
-        total_label = "Total Due (includes tax)"
+        total_label = "Invoice Total (includes tax)"
 
     totals_rows.append(
         """
-        <tr class=\"totals-row total-due\">
+        <tr class=\"totals-row invoice-total\">
             <td colspan=\"3\" class=\"totals-label\">{label}</td>
             <td class=\"currency\">{total}</td>
         </tr>
         """.format(label=total_label, total=_format_currency(total_due))
     )
 
+    if applied_payment > 0:
+        totals_rows.append(
+            """
+            <tr class=\"totals-row payment-applied\">
+                <td colspan=\"3\" class=\"totals-label\">Payment Applied</td>
+                <td class=\"currency\">-{payment}</td>
+            </tr>
+            """.format(payment=_format_currency(applied_payment))
+        )
+
+    totals_rows.append(
+        """
+        <tr class=\"totals-row total-due\">
+            <td colspan=\"3\" class=\"totals-label\">Balance Due</td>
+            <td class=\"currency\">{balance}</td>
+        </tr>
+        """.format(balance=_format_currency(balance_due))
+    )
+
     totals_html = "".join(totals_rows)
+
+    if balance_due <= 0.005 and total_due > 0:
+        payment_status_html = '<div class="payment-status paid-full">Paid in Full</div>'
+    elif applied_payment > 0:
+        payment_status_html = (
+            '<div class="payment-status partial">'
+            f'Payment Applied: {_format_currency(applied_payment)} &nbsp; | &nbsp; '
+            f'Remaining Balance: {_format_currency(balance_due)}'
+            '</div>'
+        )
+    else:
+        payment_status_html = f'<div class="payment-status due">Balance Due: {_format_currency(balance_due)}</div>'
 
     terms_display = html.escape(terms_value)
 
@@ -1291,6 +1344,8 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
             payment_items.append(
                 f"<li><span class=\"payment-label\">{html.escape(label_text)}</span> {formatted_value}</li>"
             )
+        else:
+            payment_items.append(f"<li><span class=\"payment-label\">{html.escape(label_text)}</span></li>")
 
     payment_options_html = ""
     if payment_items:
@@ -1304,6 +1359,8 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
         )
 
     other_note = (settings.payment_other or "").strip()
+    if re.fullmatch(r"paid\s+in\s+full[.!]?", other_note, re.IGNORECASE):
+        other_note = ""
     payment_notes_html = ""
     if other_note:
         payment_notes_html = (
@@ -1344,28 +1401,34 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
     company_paragraphs = "".join(f"<p>{html.escape(line)}</p>" for line in company_lines)
 
     styles = f"""
-        body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 36px; background-color: #ffffff; color: #1f2933; font-size: 11pt; line-height: 1.1; }}
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 18px; background-color: #ffffff; color: #1f2933; font-size: 11pt; line-height: 1.08; }}
         p {{ margin: 0; }}
-        .invoice {{ max-width: 820px; margin: 0 auto; background: #ffffff; padding: 30px 32px; border-radius: 12px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08); border: 1px solid #e5e9f0; }}
-        .invoice-header {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 18px; }}
-        .company-block {{ display: flex; gap: 12px; align-items: flex-start; }}
+        .invoice {{ max-width: 820px; margin: 0 auto; background: #ffffff; padding: 20px 24px; border-radius: 12px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08); border: 1px solid #e5e9f0; }}
+        .invoice-header {{ width: 100%; border-collapse: collapse; margin-bottom: 12px; }}
+        .invoice-header td {{ vertical-align: top; border: none; padding: 0; }}
+        .company-block {{ width: 100%; border-collapse: collapse; }}
+        .company-block td {{ vertical-align: top; border: none; padding: 0 10px 0 0; }}
+        .company-cell {{ width: 58%; }}
+        .invoice-cell {{ width: 42%; text-align: right; }}
         .company-info h1 {{ margin: 0 0 6px 0; font-size: 21pt; letter-spacing: 0.03em; color: #111827; }}
         .company-info p {{ margin: 0; color: #4b5563; font-size: 10pt; }}
-        .logo-wrap {{ flex-shrink: 0; border-radius: 10px; border: 1px solid #dfe4ea; padding: 6px; background: #ffffff; }}
+        .logo-wrap {{ width: {invoice_logo_size}px; padding: 0 10px 0 0; }}
         .logo {{ width: {invoice_logo_size}px; height: {invoice_logo_size}px; object-fit: contain; display: block; }}
         .invoice-title {{ font-size: 30pt; font-weight: 700; color: #0f172a; letter-spacing: 0.12em; text-align: right; margin: 0 0 6px 0; }}
         .invoice-meta {{ text-align: right; font-size: 10.5pt; color: #334155; background: #ffffff; border: 1px solid #e5e9f0; border-radius: 10px; padding: 10px 14px; display: inline-block; }}
         .invoice-meta table {{ margin-left: auto; border-collapse: collapse; }}
         .invoice-meta th {{ text-align: left; padding: 2px 10px 2px 0; font-weight: 600; color: #0f172a; }}
         .invoice-meta td {{ padding: 2px 0; }}
-        .address-section {{ display: flex; gap: 24px; margin-bottom: 18px; }}
-        .address-card {{ flex: 1; background-color: #ffffff; padding: 14px 16px; border-radius: 12px; border: 1px solid #e5e9f0; box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05); }}
+        .address-section {{ width: 100%; border-collapse: collapse; margin-bottom: 12px; }}
+        .address-section td {{ width: 50%; vertical-align: top; padding: 12px 16px; background-color: #ffffff; border: 1px solid #e5e9f0; }}
+        .address-section td:first-child {{ border-right: none; }}
+        .address-card {{ background-color: #ffffff; }}
         .address-card h3 {{ margin: 0 0 6px 0; text-transform: uppercase; letter-spacing: 0.12em; font-size: 9pt; color: #6b7280; }}
         .address-card p {{ margin: 0; color: #111827; font-size: 10.5pt; line-height: 1.1; }}
-        .comments {{ margin-bottom: 18px; background: #ffffff; border: 1px solid #f0f2f6; border-radius: 12px; padding: 14px 16px; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04); }}
+        .comments {{ margin-bottom: 12px; background: #ffffff; border: 1px solid #f0f2f6; border-radius: 12px; padding: 10px 14px; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04); }}
         .comments h3 {{ margin: 0 0 6px 0; font-size: 10pt; letter-spacing: 0.12em; text-transform: uppercase; color: #6b7280; }}
         .comments p {{ margin: 0; background: #ffffff; padding: 0; color: #1f2933; font-size: 10.5pt; border-radius: 6px; line-height: 1.1; }}
-        table.items-table {{ width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 10.5pt; border: 1px solid #e5e9f0; border-radius: 12px; overflow: hidden; }}
+        table.items-table {{ width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 10.5pt; border: 1px solid #e5e9f0; border-radius: 12px; overflow: hidden; }}
         table.items-table thead th {{ text-align: left; font-weight: 600; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.12em; padding: 8px 8px; background-color: #f8fafc; border-bottom: 1px solid #e5e9f0; color: #0f172a; }}
         table.items-table tbody td {{ padding: 6px 8px; border-bottom: 1px solid #e5e9f0; vertical-align: top; background: #ffffff; }}
         table.items-table tbody tr:last-child td {{ border-bottom: none; }}
@@ -1389,7 +1452,12 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
         table.items-table tfoot .totals-label {{ text-align: right; font-weight: 600; }}
         table.items-table tfoot tr.total-due td {{ background: #0f172a; color: #ffffff; font-size: 11.5pt; font-weight: 700; border-top: none; }}
         table.items-table tfoot tr.total-due .totals-label {{ color: #ffffff; }}
-        .footer {{ margin-top: 18px; font-size: 10pt; text-align: center; color: #6b7280; letter-spacing: 0.04em; text-transform: uppercase; }}
+        table.items-table tfoot tr.invoice-total td {{ font-weight: 700; }}
+        table.items-table tfoot tr.payment-applied td {{ color: #166534; font-weight: 600; }}
+        .payment-status {{ margin: 2px 0 10px 0; padding: 8px 12px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-size: 10.5pt; font-weight: 700; text-align: right; text-transform: uppercase; }}
+        .payment-status.partial {{ color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe; }}
+        .payment-status.paid-full {{ color: #166534; background: #f0fdf4; border-color: #bbf7d0; }}
+        .footer {{ margin-top: 10px; font-size: 10pt; text-align: center; color: #6b7280; letter-spacing: 0.04em; text-transform: uppercase; }}
     """
 
     invoice_html = """
@@ -1402,32 +1470,26 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
         </head>
         <body>
             <div class="invoice">
-                <div class="invoice-header">
-                    <div class="company-block">
-                        {logo}
-                        <div class="company-info">
-                            <h1>{company}</h1>
-                            {company_details}
-                        </div>
-                    </div>
-                    <div class="invoice-meta">
-                        <div class="invoice-title">{document_title}</div>
-                        <table>
-                            <tr><th>{document_title} #</th><td>{invoice_number}</td></tr>
-                            <tr><th>Date</th><td>{invoice_date}</td></tr>
-                        </table>
-                    </div>
-                </div>
-                <div class="address-section">
-                    <div class="address-card">
+                <table class="invoice-header" width="100%" cellspacing="0" cellpadding="0"><tr>
+                    <td class="company-cell"><table class="company-block"><tr>
+                        {logo_cell}
+                        <td class="company-info"><h1>{company}</h1>{company_details}</td>
+                    </tr></table></td>
+                    <td class="invoice-cell"><div class="invoice-title">{document_title}</div><div class="invoice-meta"><table>
+                        <tr><th>{document_title} #</th><td>{invoice_number}</td></tr>
+                        <tr><th>Date</th><td>{invoice_date}</td></tr>
+                    </table></div></td>
+                </tr></table>
+                <table class="address-section" width="100%" cellspacing="0" cellpadding="0"><tr>
+                    <td class="address-card">
                         <h3>To</h3>
                         <p>{customer_block}</p>
-                    </div>
-                    <div class="address-card">
+                    </td>
+                    <td class="address-card">
                         <h3>Ship To</h3>
                         <p>{ship_block}</p>
-                    </div>
-                </div>
+                    </td>
+                </tr></table>
                 <div class="comments">
                     <h3>Comments or Special Instructions</h3>
                     <p>{comments}</p>
@@ -1448,6 +1510,7 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
                         {totals}
                     </tfoot>
                 </table>
+                {payment_status}
                 <div class="summary-row">
                     <div class="payment-instructions">
                         {payment_instructions}
@@ -1460,7 +1523,7 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
     """.format(
         order_number=html.escape(order.order_number),
         styles=styles,
-        logo=logo_markup,
+        logo_cell=f'<td class="logo-wrap">{logo_markup}</td>' if logo_markup else "",
         company=safe_company,
         document_title=document_title,
         company_details=company_paragraphs,
@@ -1471,6 +1534,7 @@ def _render_invoice_html(order: Order, settings: AppSettings, *, document_title:
         comments=comments_html,
         rows="".join(line_rows),
         totals=totals_html,
+        payment_status=payment_status_html,
         payment_instructions=payment_instructions_html,
     )
 
@@ -1517,6 +1581,8 @@ def _load_logo_data(path_str: str) -> Optional[Tuple[str, str]]:
         return None
 
     path = Path(candidate).expanduser()
+    if not path.is_absolute():
+        path = (get_storage_root() / path).expanduser()
     if not path.is_file():
         return None
 

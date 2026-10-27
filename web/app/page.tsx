@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CircleAlert,
   CircleDollarSign,
@@ -168,6 +169,14 @@ const initialOrders: Order[] = [
 ];
 
 const stages: OrderStatus[] = ["Quote", "Draft", "Awaiting Payment", "Received", "Paid", "Processing", "Ready to Ship", "Shipped"];
+const previousOrderStatus: Partial<Record<OrderStatus, OrderStatus>> = {
+  "Awaiting Payment": "Draft",
+  Received: "Draft",
+  Paid: "Received",
+  Processing: "Paid",
+  "Ready to Ship": "Processing",
+  Shipped: "Ready to Ship",
+};
 const filters = ["All orders", "Open", "Overdue", "Unpaid", "Ready to ship"];
 
 function currency(value: number) {
@@ -672,6 +681,40 @@ export default function HustleNestWorkspace() {
     setActiveView("documents");
   };
 
+  const moveSelectedOrderBack = async () => {
+    if (!selected.live || !previousOrderStatus[selected.status]) return;
+    setAdvancing(true);
+    try {
+      const response = await fetch(`${bridgeUrl}/api/orders/${selected.id}/move-back`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_status: selected.status }),
+      });
+      const payload = (await response.json()) as {
+        ok: boolean;
+        data?: BridgeOrder;
+        error?: { message: string };
+      };
+      if (!response.ok || !payload.ok || !payload.data) {
+        throw new Error(payload.error?.message || "The order could not be moved back.");
+      }
+      const updated = mapBridgeOrder(payload.data);
+      setOrders((current) => current.map((order) => (order.id === updated.id ? updated : order)));
+      const metricsResponse = await fetch(`${bridgeUrl}/api/orders/metrics`);
+      if (metricsResponse.ok) {
+        const metricsPayload = (await metricsResponse.json()) as { ok: boolean; data: OrderMetrics };
+        if (metricsPayload.ok) setMetrics(metricsPayload.data);
+      }
+      setBridgeState("connected");
+      setBridgeMessage(`${updated.number} moved back to ${updated.status}.`);
+    } catch (error: unknown) {
+      setBridgeState("error");
+      setBridgeMessage(error instanceof Error ? error.message : "The order could not be moved back.");
+    } finally {
+      setAdvancing(false);
+    }
+  };
+
   const openHealthTarget = (view: WorkspaceView, id?: number, settingId?: string) => {
     if (view === "settings") {
       setActiveView("settings");
@@ -938,6 +981,11 @@ export default function HustleNestWorkspace() {
                 <button className="primary-button flex-button" onClick={advanceSelectedOrder} disabled={selected.status === "Shipped" || selected.status === "Cancelled" || advancing}>
                   {advancing ? "Updating…" : selected.status === "Cancelled" ? "Order cancelled" : selected.status === "Shipped" ? "Order complete" : "Advance status"}<ChevronRight size={17} />
                 </button>
+                {selected.live && previousOrderStatus[selected.status] ? (
+                  <button className="secondary-button" onClick={() => void moveSelectedOrderBack()} disabled={advancing}>
+                    <ChevronLeft size={17} /> Move back to {previousOrderStatus[selected.status]}
+                  </button>
+                ) : null}
                 <button className="secondary-button" onClick={() => void downloadSelectedInvoice()} disabled={!selected.live || lifecycleAction === "invoice"}><FileText size={17} /> {selected.paid ? "Receipt" : "Invoice"}</button>
                 <button className="secondary-button" onClick={() => void toggleSelectedPayment()} disabled={!selected.live || selected.status === "Cancelled" || lifecycleAction === "payment"}><BadgeDollarSign size={17} /> {lifecycleAction === "payment" ? "Saving…" : selected.paid ? "Mark unpaid" : "Mark paid"}</button>
                 {selected.live && selected.status !== "Cancelled" ? (

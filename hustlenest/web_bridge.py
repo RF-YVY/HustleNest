@@ -225,7 +225,10 @@ def _entry_date(values: dict[str, Any]) -> date:
 
 
 def _date_field(values: dict[str, Any], field: str, label: str, *, required: bool = True) -> Optional[date]:
-    raw = str(values.get(field, "")).strip()
+    value = values.get(field, "")
+    if value is None and not required:
+        return None
+    raw = str(value).strip()
     if not raw and not required:
         return None
     try:
@@ -791,6 +794,13 @@ def _report_period(
     normalized = period.strip().casefold()
     if normalized == "this_month":
         return today.replace(day=1), today, "This month"
+    if normalized == "last_month":
+        end = today.replace(day=1) - timedelta(days=1)
+        return end.replace(day=1), end, "Last month"
+    if normalized == "last_year":
+        return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31), "Last year"
+    if normalized == "last_30_days":
+        return today - timedelta(days=29), today, "Last 30 days"
     if normalized == "this_quarter":
         quarter_month = ((today.month - 1) // 3) * 3 + 1
         return today.replace(month=quarter_month, day=1), today, "This quarter"
@@ -840,6 +850,7 @@ def reports_workspace(
     losses = loss_repository.fetch_losses(start_date=start, end_date=end)
     revenue = sum(order.total_amount for order in orders)
     cost = sum(order.total_cost for order in orders)
+    zero_sales = report_service.zero_sale_details(start, end)
     gross_profit = revenue - cost
     expense_total = sum(item.amount for item in expenses)
     loss_total = sum(item.amount for item in losses)
@@ -883,7 +894,7 @@ def reports_workspace(
 
     return {
         "period": {
-            "key": period if period in {"this_month", "this_quarter", "last_quarter", "this_year", "last_90_days", "all_time", "custom_range"} else "this_year",
+            "key": period if period in {"this_month", "last_month", "last_year", "last_30_days", "this_quarter", "last_quarter", "this_year", "last_90_days", "all_time", "custom_range"} else "this_year",
             "label": label,
             "start": start.isoformat() if start else None,
             "end": end.isoformat(),
@@ -891,6 +902,8 @@ def reports_workspace(
         "metrics": {
             "revenue": _money(revenue),
             "revenue_change": round(revenue_change, 1),
+            "cost_of_goods": _money(cost),
+            "zero_sale_cost": _money(sum(item["cost"] for item in zero_sales)),
             "gross_profit": _money(gross_profit),
             "gross_margin": round((gross_profit / revenue * 100) if revenue else 0, 1),
             "expenses": _money(expense_total),
@@ -926,6 +939,7 @@ def reports_workspace(
             {"status": item["status"], "count": item["count"], "revenue": _money(item["revenue"])}
             for item in sorted(status_totals.values(), key=lambda value: value["count"], reverse=True)
         ],
+        "zero_sale_items": zero_sales,
         "recent_orders": [
             {
                 "id": item.order_id,
@@ -945,7 +959,7 @@ def about_workspace() -> dict[str, str]:
     return {
         "app_name": "HustleNest",
         "app_version": APP_VERSION,
-        "browser_version": "4.2.1",
+        "browser_version": "4.2.3",
         "repository_url": REPOSITORY_URL,
         "releases_url": RELEASES_URL,
         "runtime": "Local Python backend + browser UI",
@@ -979,14 +993,40 @@ def report_download(query: dict[str, list[str]]) -> BinaryDownload:
     custom_start = _date_field({"start_date": query.get("start", [""])[0]}, "start_date", "Start date", required=False)
     custom_end = _date_field({"end_date": query.get("end", [""])[0]}, "end_date", "End date", required=False)
     start, end, label = _report_period(period, custom_start, custom_end)
-    effective_start = start or date(2000, 1, 1)
+    effective_start = start or min(
+        (row.order_date for row in order_repository.fetch_order_report(None, end)),
+        default=end,
+    )
     settings = settings_repository.get_app_settings()
     business = _safe_download_stem(settings.business_name)
     label_stem = _safe_download_stem(label, "Report")
 
     with TemporaryDirectory(prefix="hustlenest-report-") as directory:
         root = Path(directory)
-        if kind == "orders_csv":
+        if kind == "cpa_zip":
+            import csv
+            import zipfile
+            from dataclasses import asdict
+            report = reports_workspace(period, custom_start, custom_end)
+            def write_csv(name, rows, fields):
+                with (root / name).open("w", newline="", encoding="utf-8-sig") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+                    writer.writeheader()
+                    writer.writerows(rows)
+            write_csv("summary.csv", [{"metric": k, "value": v} for k, v in report["metrics"].items()], ["metric", "value"])
+            order_service.export_order_report(order_repository.fetch_order_report(start, end), str(root / "orders.csv"))
+            write_csv("zero_sale_items.csv", report["zero_sale_items"], ["number", "customer", "date", "product", "quantity", "revenue", "cost", "profit", "notes"])
+            write_csv("expenses.csv", [asdict(i) for i in expense_repository.list_expenses(start_date=start, end_date=end)], ["id", "expense_date", "category", "amount", "description", "payment_method", "vendor_id", "document_id", "notes"])
+            write_csv("recorded_losses.csv", [asdict(i) for i in loss_repository.fetch_losses(start_date=start, end_date=end)], ["id", "loss_date", "category", "amount", "description", "details", "quantity", "order_id", "product_name", "material_name"])
+            (root / "README.txt").write_text(f"{settings.business_name} - CPA supporting reports\nPeriod: {start or 'All history'} through {end}, inclusive. Generated {datetime.now().isoformat()}\nUSD. Orders use order date; expenses and recorded losses use their own dates.\nOrder-based management reporting, not a cash-basis tax return. Active unfulfilled orders are included; quotes, drafts, cancelled and deleted orders are excluded. Sales tax is separate from revenue.\nGross profit = revenue - cost_of_goods. Net = gross profit - expenses - recorded losses.\nzero_sale_cost is already included in COGS, not an additional deduction. Shipped means fulfilled. Zero-price lines in mixed paid orders are included. Costs reflect saved item costs; review missing costs.\nReview separately entered expenses and losses against order costs for duplicates. Retain receipts and invoices. Payment timing, bank reconciliation, depreciation and tax adjustments require separate CPA review.\n", encoding="utf-8")
+            filename = f"{business}_CPA_{label_stem}.zip"
+            path = root / filename
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+                for source in sorted(root.iterdir()):
+                    if source != path:
+                        archive.write(source, source.name)
+            content_type = "application/zip"
+        elif kind == "orders_csv":
             filename = f"{business}_Orders_{label_stem}.csv"
             path = order_service.export_order_report(order_repository.fetch_order_report(start, end), str(root / filename))
             content_type = "text/csv; charset=utf-8"
@@ -1015,8 +1055,12 @@ def report_download(query: dict[str, list[str]]) -> BinaryDownload:
             elif kind == "customer_pdf":
                 html = report_service.generate_customer_report_html(effective_start, end, settings)
             else:
-                comparison = query.get("comparison", ["year_vs_year"])[0].strip().casefold()
-                p1_start, p1_end, p2_start, p2_end, p1_label, p2_label = _comparison_periods(comparison)
+                if start is None:
+                    raise BridgeError("validation_failed", "Choose a bounded date range for a period comparison.", HTTPStatus.BAD_REQUEST)
+                p1_start, p1_end, p1_label = start, end, label
+                p2_end = start - timedelta(days=1)
+                p2_start = p2_end - timedelta(days=(end - start).days)
+                p2_label = f"{p2_start.isoformat()} to {p2_end.isoformat()}"
                 html = report_service.generate_comparison_report_html(p1_start, p1_end, p2_start, p2_end, p1_label, p2_label, settings)
             filename = f"{business}_{report_labels[kind]}_{label_stem}.pdf"
             path = root / filename
@@ -2009,6 +2053,22 @@ def settings_workspace() -> dict[str, Any]:
     return payload
 
 
+def reveal_payment_values(payload: dict[str, Any]) -> dict[str, Any]:
+    current = settings_workspace()
+    expected_revision = str(payload.get("expected_revision", "")).strip()
+    if expected_revision and expected_revision != current["summary"]["revision"]:
+        raise BridgeError("settings_conflict", "Settings changed in another window. Refresh and try again.", HTTPStatus.CONFLICT)
+    settings = settings_repository.get_app_settings()
+    return {
+        "revision": current["summary"]["revision"],
+        "methods": [
+            {"source_index": index, "value": option.value}
+            for index, option in enumerate(settings.payment_options)
+        ],
+        "other": settings.payment_other,
+    }
+
+
 def _setting_bool(value: Any, field: str) -> bool:
     if isinstance(value, bool):
         return value
@@ -2158,8 +2218,6 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
             source_index = raw_method.get("source_index")
             replacement = str(raw_method.get("replacement", "")).strip()[:500]
             if source_index is None:
-                if not replacement:
-                    raise BridgeError("validation_failed", "New payment methods need a destination.", HTTPStatus.BAD_REQUEST, {f"methods.{position}.replacement": "required"})
                 value = replacement
             else:
                 try:
@@ -3980,6 +4038,58 @@ def advance_order(order_id: int, expected_status: str) -> dict[str, Any]:
     return get_order(order_id)
 
 
+def move_order_back(order_id: int, expected_status: str) -> dict[str, Any]:
+    expected = expected_status.strip()
+    if expected not in ORDER_STATUSES:
+        raise BridgeError("invalid_status", "The current status is not recognized.", HTTPStatus.BAD_REQUEST)
+    transitions = {
+        "Awaiting Payment": "Draft",
+        "Received": "Draft",
+        "Paid": "Received",
+        "Processing": "Paid",
+        "Ready to Ship": "Processing",
+        "Shipped": "Ready to Ship",
+    }
+    if expected not in transitions:
+        raise BridgeError("cannot_move_back", "This order cannot move back any further.", HTTPStatus.CONFLICT)
+    previous_status = transitions[expected]
+    with MUTATION_LOCK, create_connection() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE orders
+            SET status = ?,
+                ship_date = CASE WHEN ? = 'Shipped' THEN NULL ELSE ship_date END
+            WHERE id = ?
+              AND status = ?
+              AND deleted_at IS NULL
+            """,
+            (previous_status, expected, int(order_id), expected),
+        )
+        if cursor.rowcount != 1:
+            exists = connection.execute(
+                "SELECT status FROM orders WHERE id = ? AND deleted_at IS NULL", (int(order_id),)
+            ).fetchone()
+            if exists is None:
+                raise BridgeError("not_found", "Order not found.", HTTPStatus.NOT_FOUND)
+            raise BridgeError(
+                "status_conflict",
+                "The order changed in another window. Refresh and try again.",
+                HTTPStatus.CONFLICT,
+            )
+        row = connection.execute(
+            "SELECT order_number FROM orders WHERE id = ?", (int(order_id),)
+        ).fetchone()
+        connection.execute(
+            """
+            INSERT INTO order_history (order_id, order_number, event_type, description, amount_delta)
+            VALUES (?, ?, 'Status moved back', ?, 0)
+            """,
+            (int(order_id), row["order_number"], f"Status moved back from {expected} to {previous_status}."),
+        )
+        connection.commit()
+    return get_order(order_id)
+
+
 def update_order_payment(order_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     expected = str(payload.get("expected_payment_status", "")).strip().casefold()
     requested = str(payload.get("payment_status", "")).strip().casefold()
@@ -4040,7 +4150,12 @@ def invoice_download(order_id: int) -> BinaryDownload:
     document_kind = "quote" if workflow["record_type"] == "quote" else ("receipt" if order.is_paid else "invoice")
     filename = f"{safe_number}_{document_kind}.pdf"
     with TemporaryDirectory(prefix="hustlenest-invoice-") as directory:
-        path = order_service.export_order_invoice(order_id, str(Path(directory) / filename), document_title="Quote" if document_kind == "quote" else None)
+        path = order_service.export_order_invoice(
+            order_id,
+            str(Path(directory) / filename),
+            document_title="Quote" if document_kind == "quote" else None,
+            amount_paid=float(workflow["amount_paid"]),
+        )
         content = path.read_bytes()
     return BinaryDownload(filename=filename, content_type="application/pdf", content=content)
 
@@ -4148,6 +4263,8 @@ class BridgeApplication:
             return HTTPStatus.OK, settings_workspace()
         if method == "PUT" and path == "/api/settings":
             return HTTPStatus.OK, update_settings(body or {})
+        if method == "POST" and path == "/api/settings/payments/reveal":
+            return HTTPStatus.OK, reveal_payment_values(body or {})
         if method == "GET" and path == "/api/settings/logo":
             return HTTPStatus.OK, download_dashboard_logo()
         if method == "POST" and path == "/api/settings/logo":
@@ -4315,6 +4432,8 @@ class BridgeApplication:
                 return HTTPStatus.OK, get_order(order_id)
             if method == "POST" and len(segments) == 4 and segments[3] == "advance":
                 return HTTPStatus.OK, advance_order(order_id, str((body or {}).get("expected_status", "")))
+            if method == "POST" and len(segments) == 4 and segments[3] == "move-back":
+                return HTTPStatus.OK, move_order_back(order_id, str((body or {}).get("expected_status", "")))
             if method == "POST" and len(segments) == 4 and segments[3] == "payment":
                 return HTTPStatus.OK, update_order_payment(order_id, body or {})
             if method == "POST" and len(segments) == 4 and segments[3] == "cancel":
@@ -4405,6 +4524,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self._cors_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
@@ -4420,7 +4540,8 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
     def _cors_headers(self) -> None:
         origin = self.headers.get("Origin", "")
-        if origin in {"http://localhost:3000", "http://127.0.0.1:3000"}:
+        allowed_origin = getattr(self.server, "allowed_browser_origin", "http://localhost:3000")
+        if origin == allowed_origin:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -4442,12 +4563,15 @@ class BrowserClientLifecycle:
         disconnect_grace_seconds: float = 10.0,
         stale_after_seconds: float = 75.0,
         poll_seconds: float = 1.0,
+        startup_grace_seconds: float = 60.0,
     ) -> None:
         self.enabled = enabled
         self._shutdown_callback = shutdown_callback
         self._disconnect_grace_seconds = disconnect_grace_seconds
         self._stale_after_seconds = stale_after_seconds
         self._poll_seconds = poll_seconds
+        self._startup_grace_seconds = startup_grace_seconds
+        self._started_at = time.monotonic()
         self._clients: dict[str, float] = {}
         self._seen_client = False
         self._empty_since: Optional[float] = None
@@ -4494,6 +4618,8 @@ class BrowserClientLifecycle:
                     if self._empty_since is None:
                         self._empty_since = now
                     should_shutdown = now - self._empty_since >= self._disconnect_grace_seconds
+                elif not self._seen_client:
+                    should_shutdown = now - self._started_at >= self._startup_grace_seconds
             if should_shutdown:
                 LOGGER.info("Final browser client disconnected; stopping HustleNest.")
                 self._shutdown_callback()
@@ -4507,10 +4633,12 @@ def run(
     *,
     shutdown_on_client_disconnect: bool = False,
     client_disconnect_grace_seconds: float = 10.0,
+    allowed_browser_origin: Optional[str] = None,
 ) -> None:
     initialize()
     order_service.ensure_invoice_runtime()
     server = ThreadingHTTPServer((host, port), BridgeRequestHandler)
+    setattr(server, "allowed_browser_origin", allowed_browser_origin or "http://localhost:3000")
     lifecycle = BrowserClientLifecycle(
         server.shutdown,
         enabled=shutdown_on_client_disconnect,

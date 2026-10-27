@@ -153,6 +153,10 @@ test("includes connected business, home, and reporting workspace modules", async
   assert.match(settings, /Invoice payment methods/);
   assert.match(settings, /Saved destinations stay masked/);
   assert.match(settings, /Add payment method/);
+  assert.match(settings, /Save payment methods/);
+  assert.match(settings, /Payment destination \(optional\)/);
+  assert.match(settings, /Show saved values/);
+  assert.match(settings, /Hide saved values/);
   assert.match(settings, /other_action/);
   assert.match(settings, /Revision protected/);
   assert.match(backups, /Backups & recovery/);

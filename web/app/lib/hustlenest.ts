@@ -231,6 +231,8 @@ export type ReportsWorkspaceData = {
   metrics: {
     revenue: string;
     revenue_change: number;
+    cost_of_goods: string;
+    zero_sale_cost: string;
     gross_profit: string;
     gross_margin: number;
     expenses: string;
@@ -243,6 +245,7 @@ export type ReportsWorkspaceData = {
   products: Array<{ name: string; quantity: number; revenue: string; profit: string; margin: number }>;
   customers: Array<{ name: string; orders: number; revenue: string; profit: string }>;
   fulfillment: Array<{ status: string; count: number; revenue: string }>;
+  zero_sale_items: Array<{ order_id: number; number: string; customer: string; product: string; quantity: number; cost: number; profit: number }>;
   recent_orders: Array<{ id: number; number: string; customer: string; date: string; status: string; revenue: string; profit: string }>;
 };
 

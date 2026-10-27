@@ -164,7 +164,7 @@ def get_app_settings() -> AppSettings:
                 continue
             label_text = str(entry.get("label", "")).strip()
             value_text = str(entry.get("value", "")).strip()
-            if label_text and value_text:
+            if label_text:
                 payment_options.append(PaymentOption(label=label_text, value=value_text))
 
     legacy_sources = [

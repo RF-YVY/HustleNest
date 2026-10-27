@@ -1,31 +1,11 @@
-# HustleNest v4.2.1
+# HustleNest v4.2.3
 
-**Release date:** July 22, 2026
+**Release date:** October 27, 2026
 
-HustleNest v4.2.1 is a lifecycle maintenance release for the Windows application.
+- Identify fulfilled $0 replacement items and their saved production costs in reports and PDF exports without deducting costs twice.
+- Download a CPA ZIP package with a financial summary, orders, expenses, recorded losses, replacement-item detail, and reporting-basis notes.
+- Scope reports and downloads by date: current/previous month, quarter, year, rolling 30/90 days, all history, or inclusive custom dates.
+- Compare the selected date range with the preceding period of equal length. Inventory exports remain clearly labeled current snapshots.
+- Includes pending launch isolation, invoice, payment, and order workflow fixes.
 
-## Highlights
-
-- Closing the final HustleNest browser workspace now shuts down the local Python backend and embedded web server.
-- The launcher cleans up its Node.js child process before exiting, preventing HustleNest from remaining in Windows Processes.
-- Ordinary browser refreshes and multiple open HustleNest tabs are handled without prematurely stopping the application.
-- A heartbeat fallback closes orphaned processes after an abrupt browser termination.
-
-## Fixes
-
-- Fixed the packaged launcher continuing to run after its browser window was closed.
-- Fixed the command prompt and embedded web-server process remaining alive after the user finished using HustleNest.
-
-## Install or upgrade
-
-1. Download `HustleNestSetup.exe` from this release.
-2. Run the installer and follow the prompts.
-3. Launch HustleNest from the Start menu or desktop shortcut.
-
-Existing databases and saved preferences remain in `%LOCALAPPDATA%\HustleNest`. Backing up before a major-version upgrade is recommended.
-
-**System requirements:** 64-bit Windows 10 or later, 4 GB RAM minimum, and a modern browser. The installer includes the browser runtime needed by HustleNest.
-
-## Installer verification
-
-`HustleNestSetup.exe` SHA-256: `DAA567006F9A12713DECDB2A9FD9A4512462E3FFD47965FE98C42BAF3558C3B2`
+Download HustleNestSetup.exe and run it to upgrade. Existing data and settings remain in %LOCALAPPDATA%\HustleNest.
