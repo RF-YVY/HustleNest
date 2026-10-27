@@ -996,18 +996,20 @@ def generate_comparison_report_html(
         HTML string
     """
     # Get period 1 data
-    p1_revenue = finance_service.calculate_sales_total(period1_start, period1_end)
-    p1_cost = finance_service.calculate_cogs_total(period1_start, period1_end)
+    p1_rows = order_repository.fetch_order_report(period1_start, period1_end)
+    p1_revenue = sum(row.total_amount for row in p1_rows)
+    p1_cost = sum(row.total_cost for row in p1_rows)
     p1_profit = p1_revenue - p1_cost
     p1_expenses = finance_service.calculate_expense_total(start_date=period1_start, end_date=period1_end)
-    p1_orders = order_repository.count_orders_in_range(period1_start, period1_end)
+    p1_orders = len(p1_rows)
     
     # Get period 2 data
-    p2_revenue = finance_service.calculate_sales_total(period2_start, period2_end)
-    p2_cost = finance_service.calculate_cogs_total(period2_start, period2_end)
+    p2_rows = order_repository.fetch_order_report(period2_start, period2_end)
+    p2_revenue = sum(row.total_amount for row in p2_rows)
+    p2_cost = sum(row.total_cost for row in p2_rows)
     p2_profit = p2_revenue - p2_cost
     p2_expenses = finance_service.calculate_expense_total(start_date=period2_start, end_date=period2_end)
-    p2_orders = order_repository.count_orders_in_range(period2_start, period2_end)
+    p2_orders = len(p2_rows)
     
     def calc_change(current: float, previous: float) -> Tuple[float, str]:
         if previous == 0:
