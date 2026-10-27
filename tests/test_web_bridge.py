@@ -46,6 +46,44 @@ from hustlenest.services import order_service, report_service, soft_delete_servi
 
 
 class OrdersBridgeTests(unittest.TestCase):
+    def test_excluded_orders_do_not_change_financial_totals(self):
+        from hustlenest.services import finance_service, goal_service
+        from hustlenest.web_bridge import reports_workspace, home_workspace, finance_workspace, order_metrics
+        from dataclasses import asdict
+        today = date.today()
+        def financial_state():
+            return {
+                "reports": reports_workspace("this_year"),
+                "customer_summary": [asdict(item) for item in order_repository.get_customer_sales_summary(today, today)],
+                "all_customers": [asdict(item) for item in order_repository.fetch_top_customers()],
+                "home": home_workspace()["metrics"],
+                "finance_sales": finance_service.calculate_sales_total(today, today),
+                "finance_cost": finance_service.calculate_cogs_total(today, today),
+                "finance_profit": finance_service.calculate_profit_total(today, today),
+                "cash_flow": asdict(finance_service.summarize_cash_flow()),
+                "dashboard": asdict(order_service.get_dashboard_snapshot()),
+                "tax": asdict(order_service.summarize_sales_tax(today, today)[0]),
+                "goal_orders": goal_service._count_orders(today, today),
+                "forecast": [asdict(item) for item in order_repository.fetch_product_forecast()],
+                "order_metrics": order_metrics(),
+            }
+        before = financial_state()
+        for number, status, deleted in [("TRASH", "Shipped", True), ("CANCEL", "Cancelled", False),
+                                         ("CANCELED", "Canceled", False), ("QUOTE", "Quote", False), ("DRAFT", "Draft", False)]:
+            oid = order_repository.insert_order(Order(
+                order_number=number, customer_name="Excluded Customer", customer_address="",
+                order_date=today, status=status, tax_amount=20,
+                items=[OrderItem(product_name=self.product.name, product_description="", product_sku=self.product.sku,
+                                 product_id=self.product.id, quantity=10, unit_price=100, base_unit_cost=50)]))
+            if deleted:
+                with create_connection() as connection:
+                    connection.execute("UPDATE orders SET deleted_at=? WHERE id=?", (datetime.now().isoformat(), oid))
+        after = financial_state()
+        # Quotes remain visible as operational counts, but contribute no money.
+        before["order_metrics"].pop("open_quotes")
+        after["order_metrics"].pop("open_quotes")
+        self.assertEqual(after, before)
+
     def test_customer_report_excludes_trashed_orders(self):
         for number, amount, deleted, status in [
             ("ACTIVE", 825, False, "Shipped"),

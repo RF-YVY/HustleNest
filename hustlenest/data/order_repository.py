@@ -374,7 +374,7 @@ def list_orders_in_range(start_date: date, end_date: date) -> List[Order]:
             FROM orders AS o
             WHERE o.order_date >= ?
               AND o.order_date <= ?
-              AND UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+              AND UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND o.deleted_at IS NULL
             ORDER BY o.order_date DESC
             """,
@@ -719,7 +719,7 @@ def fetch_order_history(
 
 
 def fetch_total_sales() -> float:
-    total_sales, _, _ = fetch_financial_totals()
+    total_sales, _, _, _, _ = fetch_financial_totals()
     return total_sales
 
 
@@ -736,7 +736,7 @@ def fetch_financial_totals() -> tuple[float, float, float, float, float]:
                 o.is_paid
             FROM order_items AS oi
             JOIN orders AS o ON o.id = oi.order_id
-            WHERE UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+            WHERE UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND o.deleted_at IS NULL
             """
         )
@@ -770,7 +770,7 @@ def fetch_tax_total(start_date: Optional[date] = None, end_date: Optional[date] 
             """
             SELECT COALESCE(SUM(tax_amount), 0) AS total_tax
             FROM orders
-            WHERE UPPER(status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+            WHERE UPPER(TRIM(status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND deleted_at IS NULL
               AND (? IS NULL OR order_date >= ?)
               AND (? IS NULL OR order_date <= ?)
@@ -801,7 +801,7 @@ def fetch_product_sales_summary() -> List[ProductSalesSummary]:
             FROM order_items AS oi
             JOIN orders AS o ON o.id = oi.order_id
             LEFT JOIN products AS p ON p.sku = oi.product_sku
-            WHERE UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+            WHERE UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND o.deleted_at IS NULL
             """
         )
@@ -878,7 +878,7 @@ def get_product_sales_summary(start_date: date, end_date: date) -> List[ProductS
             FROM order_items AS oi
             JOIN orders AS o ON o.id = oi.order_id
             LEFT JOIN products AS p ON p.sku = oi.product_sku
-            WHERE UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+            WHERE UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND o.deleted_at IS NULL
               AND o.order_date >= ?
               AND o.order_date <= ?
@@ -951,7 +951,7 @@ def fetch_top_customers(limit: int = 10) -> List[CustomerSalesSummary]:
                 o.total_amount
             FROM orders AS o
             WHERE TRIM(o.customer_name) <> ''
-              AND UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+              AND UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND o.deleted_at IS NULL
             """
         )
@@ -1066,7 +1066,7 @@ def get_customer_sales_summary(start_date: date, end_date: date) -> List[Custome
             FROM orders AS o
             WHERE o.deleted_at IS NULL
               AND TRIM(o.customer_name) <> ''
-              AND UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+              AND UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND o.order_date >= ?
               AND o.order_date <= ?
             """,
@@ -1179,7 +1179,7 @@ def count_orders_in_range(start_date: date, end_date: date) -> int:
             FROM orders AS o
             WHERE o.order_date >= ?
               AND o.order_date <= ?
-              AND UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+              AND UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND o.deleted_at IS NULL
             """,
             (start_date.strftime(_DATE_FORMAT), end_date.strftime(_DATE_FORMAT)),
@@ -1211,7 +1211,8 @@ def fetch_product_forecast(window_days: int = 30, limit: int = 25) -> List[Produ
                 FROM order_items AS oi
                 JOIN orders AS o ON o.id = oi.order_id
                 WHERE o.order_date >= ?
-                  AND UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+                  AND o.deleted_at IS NULL
+                  AND UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
                 GROUP BY oi.product_sku
             ) AS s ON s.sku = p.sku
             """,
@@ -1273,7 +1274,7 @@ def fetch_outstanding_orders() -> List[OutstandingOrder]:
                 target_completion_date
             FROM orders
             WHERE UPPER(status) <> 'SHIPPED'
-              AND UPPER(status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+              AND UPPER(TRIM(status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND deleted_at IS NULL
             ORDER BY order_date ASC;
             """
@@ -1374,7 +1375,7 @@ def fetch_order_report(start_date: Optional[date], end_date: Optional[date]) -> 
             FROM orders AS o
             WHERE (? IS NULL OR o.order_date >= ?)
               AND (? IS NULL OR o.order_date <= ?)
-              AND UPPER(o.status) NOT IN ('CANCELLED', 'QUOTE', 'DRAFT')
+              AND UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
               AND o.deleted_at IS NULL
             ORDER BY o.order_date DESC;
             """,

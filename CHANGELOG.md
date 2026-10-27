@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - Fixed customer reports including trashed orders in customer totals and rankings.
 - Excluded deleted order revenue, cost, and counts while preserving trash records.
+- Audited cash flow, financial goals, payment totals, tax, and forecasts; excluded trashed/cancelled orders across financial queries.
 
 ## v4.2.3 — October 27, 2026
 

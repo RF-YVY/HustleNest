@@ -48,7 +48,8 @@ def _count_orders(start_date: date, end_date: date) -> int:
             """
             SELECT COUNT(*) AS order_count
             FROM orders
-            WHERE UPPER(status) <> 'CANCELLED'
+            WHERE UPPER(TRIM(status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
+              AND deleted_at IS NULL
               AND order_date >= ?
               AND order_date <= ?
             """,

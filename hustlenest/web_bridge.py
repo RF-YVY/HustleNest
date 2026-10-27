@@ -45,7 +45,7 @@ from .services import cloud_sync_service, crm_service, finance_service, goal_ser
 
 LOGGER = logging.getLogger("hustlenest.web_bridge")
 ORDER_STATUSES = ("Quote", "Draft", "Awaiting Payment", "Received", "Paid", "Processing", "Ready to Ship", "Shipped")
-CLOSED_ORDER_STATUSES = frozenset({"Shipped", "Cancelled"})
+CLOSED_ORDER_STATUSES = frozenset({"Shipped", "Cancelled", "Canceled"})
 RECURRING_FREQUENCIES = {"daily", "weekly", "biweekly", "monthly", "quarterly", "yearly"}
 GOAL_METRICS = {"revenue", "sales", "profit", "orders", "expenses", "losses", "crm-followups"}
 US_STATE_NAMES = {
@@ -1800,7 +1800,7 @@ def health_center_workspace() -> dict[str, Any]:
     if integrity.casefold() != "ok":
         add("database-integrity", "critical", "Database needs attention", "SQLite integrity verification did not return OK. Create a backup and review diagnostics.", "settings", setting_id="settings-backups")
 
-    open_orders = [order for order in orders if order.status not in CLOSED_ORDER_STATUSES and _order_workflow(order.id)["record_type"] != "quote"]
+    open_orders = [order for order in orders if order.status.strip().casefold() not in {"shipped", "cancelled", "canceled", "quote", "draft"} and _order_workflow(order.id)["record_type"] != "quote"]
     quotes = [order for order in orders if _order_workflow(order.id)["record_type"] == "quote" and order.status != "Cancelled"]
     overdue = [order for order in open_orders if order.target_completion_date and order.target_completion_date < today]
     if overdue:
@@ -3568,7 +3568,7 @@ def _save_order_workflow(order_id: int, draft: dict[str, Any], total: float, *, 
 
 
 def _attention_reasons(order: Order) -> list[str]:
-    if order.status in CLOSED_ORDER_STATUSES:
+    if order.status.strip().casefold() in {"shipped", "cancelled", "canceled", "draft"}:
         return []
     reasons: list[str] = []
     workflow = _order_workflow(order.id)
@@ -3660,7 +3660,7 @@ def get_order(order_id: int) -> dict[str, Any]:
 
 def order_metrics() -> dict[str, Any]:
     orders = order_repository.fetch_orders(2000)
-    open_orders = [order for order in orders if order.status not in CLOSED_ORDER_STATUSES and _order_workflow(order.id)["record_type"] != "quote"]
+    open_orders = [order for order in orders if order.status.strip().casefold() not in {"shipped", "cancelled", "canceled", "quote", "draft"} and _order_workflow(order.id)["record_type"] != "quote"]
     quotes = [order for order in orders if _order_workflow(order.id)["record_type"] == "quote" and order.status != "Cancelled"]
     unpaid = [order for order in open_orders if not order.is_paid]
     ready = [order for order in open_orders if order.status == "Ready to Ship"]

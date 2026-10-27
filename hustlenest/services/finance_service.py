@@ -68,7 +68,8 @@ def _fetch_sales_total(start_date: date, end_date: date) -> float:
         SELECT
             COALESCE(SUM(total_amount + tax_amount), 0) AS total_value
         FROM orders
-        WHERE UPPER(status) <> 'CANCELLED'
+        WHERE UPPER(TRIM(status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
+          AND deleted_at IS NULL
           AND order_date >= ?
           AND order_date <= ?
     """
@@ -125,7 +126,8 @@ def _fetch_sales_and_cost(start_date: date, end_date: date) -> tuple[float, floa
             oi.cost_components
         FROM order_items AS oi
         JOIN orders AS o ON o.id = oi.order_id
-        WHERE UPPER(o.status) <> 'CANCELLED'
+        WHERE UPPER(TRIM(o.status)) NOT IN ('CANCELLED', 'CANCELED', 'QUOTE', 'DRAFT')
+          AND o.deleted_at IS NULL
           AND o.order_date >= ?
           AND o.order_date <= ?
     """

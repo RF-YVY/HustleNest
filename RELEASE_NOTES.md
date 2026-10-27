@@ -4,6 +4,8 @@
 
 - Fixed customer report PDFs including orders in the trash, which inflated customer order counts, sales, averages, costs, and report totals.
 - Deleted orders now remain excluded from customer summaries, consistent with the main reports and order detail exports.
-- Added regression coverage for active, deleted, and cancelled orders.
+- Excluded trashed and cancelled orders from cash-flow calculations, financial goals, payment totals, and product-demand forecasts.
+- Verified revenue, cost, profit, tax, customer summaries, dashboard metrics, and cash projections remain unchanged when excluded orders are present.
+- Recognize both Cancelled and Canceled spellings in financial filters.
 
 Download and run HustleNestSetup.exe to upgrade, then export the customer report again. Existing data is preserved; no order records need to be edited or permanently deleted.
